@@ -1,0 +1,20 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@layer base {
+  :root {
+    --bg: #faf9f7;
+    --card: #ffffff;
+    --border: #e8e4de;
+    --text: #2d2926;
+    --muted: #8b7f74;
+    --accent: #c4956a;
+    --accent-light: #f5ede4;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  }
+}
