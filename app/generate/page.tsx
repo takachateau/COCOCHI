@@ -142,6 +142,10 @@ export default function GeneratePage() {
   const [skinType, setSkinType]         = useState("")
   const [appealDir, setAppealDir]       = useState("")
 
+  // IP-Adapter 設定
+  const [useIPAdapter, setUseIPAdapter]     = useState(false)
+  const [ipAdapterScale, setIpAdapterScale] = useState(0.65)
+
   // 生成状態
   const [loading, setLoading]   = useState(false)
   const [progress, setProgress] = useState("")
@@ -214,6 +218,8 @@ export default function GeneratePage() {
         target: buildTarget() || undefined,
         productImageBase64: imageBase64,
         productImageMime: imageMime,
+        useIPAdapter: useIPAdapter || undefined,
+        ipAdapterScale: useIPAdapter ? ipAdapterScale : undefined,
       }
 
       const startRes = await fetch("/api/generate", {
@@ -467,6 +473,56 @@ export default function GeneratePage() {
                   />
                 </div>
               ))}
+            </div>
+
+            {/* ── IP-Adapter 設定 ── */}
+            <div
+              className="rounded-xl p-4 space-y-3"
+              style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold" style={{ color: "var(--text)" }}>
+                    IP-Adapter スタイル転写
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
+                    参照画像の色調・雰囲気をUGCに転写（β）
+                  </p>
+                </div>
+                <button
+                  onClick={() => setUseIPAdapter(v => !v)}
+                  className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0"
+                  style={{ background: useIPAdapter ? "var(--accent)" : "var(--border)" }}
+                >
+                  <span
+                    className="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+                    style={{ transform: useIPAdapter ? "translateX(22px)" : "translateX(2px)" }}
+                  />
+                </button>
+              </div>
+              {useIPAdapter && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs" style={{ color: "var(--muted)" }}>スタイル強度</label>
+                    <span className="text-xs font-bold" style={{ color: "var(--accent)" }}>
+                      {Math.round(ipAdapterScale * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={0.9}
+                    step={0.05}
+                    value={ipAdapterScale}
+                    onChange={e => setIpAdapterScale(Number(e.target.value))}
+                    className="w-full accent-pink-400"
+                  />
+                  <div className="flex justify-between text-xs mt-0.5" style={{ color: "var(--muted)" }}>
+                    <span>弱（忠実に商品を）</span>
+                    <span>強（スタイルに寄せる）</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {error && (

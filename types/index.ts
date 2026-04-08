@@ -18,6 +18,8 @@ export interface ProductInput {
   target?: string
   productImageBase64: string
   productImageMime: string
+  useIPAdapter?: boolean    // IP-Adapterによるスタイル転写を使用
+  ipAdapterScale?: number   // スタイル強度 0.0〜1.0（デフォルト: 0.65）
 }
 
 // Claudeが生成する1枚分のスライドコンテンツ
