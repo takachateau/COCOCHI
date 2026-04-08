@@ -69,6 +69,22 @@ async function uploadBlob(buf: Buffer, name: string, ct = "image/jpeg"): Promise
   return url
 }
 
+// 同一リクエスト内で商品画像を何度もアップロードしないようキャッシュ
+const _productUrlCache = new Map<string, Promise<string>>()
+
+async function uploadProductOnce(base64: string): Promise<string> {
+  // base64の先頭32文字をキーに（同一画像の判定）
+  const key = base64.slice(0, 32)
+  if (!_productUrlCache.has(key)) {
+    _productUrlCache.set(key, uploadBlob(Buffer.from(base64, "base64"), `product_${Date.now()}.jpg`))
+  }
+  return _productUrlCache.get(key)!
+}
+
+export function clearProductCache() {
+  _productUrlCache.clear()
+}
+
 /**
  * IP-Adapter でスタイル転写生成（セマフォ + リトライ済み）
  *
@@ -170,8 +186,8 @@ export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> 
   const { productName, headline, tag, patternName, colorPalette, productImageBase64, instruction, useIPAdapter, ipAdapterScale } = params
   const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
 
-  // 商品画像をBlobにアップ
-  const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
+  // 商品画像をBlobにアップ（同一画像は1回だけ）
+  const productUrl = await uploadProductOnce(productImageBase64)
 
   // reference/ 全体から colorPalette / angle にマッチする参照画像を取得
   const refBuf = pickReferenceImage({ colorPalette, angle: params.angle ?? "" })
@@ -232,8 +248,8 @@ export async function generateContentSlide(params: ContentSlideParams): Promise<
   const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, angle, productImageBase64, instruction, useIPAdapter, ipAdapterScale } = params
   const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
 
-  // 商品画像をBlobにアップ
-  const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
+  // 商品画像をBlobにアップ（同一画像は1回だけ）
+  const productUrl = await uploadProductOnce(productImageBase64)
 
   // reference/ 全体から colorPalette / angle にマッチする参照画像を取得
   const refBuf = pickReferenceImage({ colorPalette, angle: angle ?? "" })

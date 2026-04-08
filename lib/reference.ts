@@ -38,15 +38,19 @@ function loadMeta(): Metadata {
   return _meta
 }
 
-// ─── reference/ 以下の全画像パスを収集 ────────────────────────────
+// ─── reference/ 以下の全画像パスを収集（起動時に1回だけ） ───────────
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
 
+let _cachedImages: string[] | null = null
+
 function collectAllImages(baseDir: string): string[] {
+  if (_cachedImages) return _cachedImages
   const results: string[] = []
   function walk(dir: string) {
     if (!fs.existsSync(dir)) return
     for (const entry of fs.readdirSync(dir)) {
+      if (entry.startsWith(".")) continue
       const full = path.join(dir, entry)
       const stat = fs.statSync(full)
       if (stat.isDirectory()) {
@@ -57,6 +61,7 @@ function collectAllImages(baseDir: string): string[] {
     }
   }
   walk(baseDir)
+  _cachedImages = results
   return results
 }
 

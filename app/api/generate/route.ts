@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateArticle, qcScore } from "@/lib/claude"
-import { generateUGCCover, generateContentSlide } from "@/lib/fal"
+import { generateUGCCover, generateContentSlide, clearProductCache } from "@/lib/fal"
 import { renderTemplateCover, renderTemplateContentSlide, addSlide2Overlay } from "@/lib/slides"
 import { saveGroup } from "@/lib/storage"
 import { createJob, updateJob, pruneOldJobs } from "@/lib/jobs"
@@ -210,5 +210,6 @@ async function processJob(jobId: string, body: ProductInput) {
   }
   const savedGroup = await saveGroup(group)
 
+  clearProductCache()
   updateJob(jobId, { status: "done", progress: "完了", group: savedGroup })
 }
