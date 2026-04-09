@@ -822,16 +822,22 @@ export async function addSlide2Overlay(
 ): Promise<Buffer> {
   const p   = PALETTES[paletteKey] ?? PALETTES.pink
   const ff  = getMplusFontFace()
+
+  // FAL生成画像の実際のサイズを取得してオーバーレイを合わせる
+  const meta = await sharp(imageBuffer).metadata()
+  const iW = meta.width  ?? W
+  const iH = meta.height ?? H
+
   const BAND_H = price ? 130 : 90
 
-  const { lines: nameLns } = fitFont(productName, W - 80, 2, 36, 24)
+  const { lines: nameLns } = fitFont(productName, iW - 80, 2, 36, 24)
   const nameLineH = 42
 
-  const bandY    = H - BAND_H
+  const bandY    = iH - BAND_H
   const nameY    = bandY + 28 + 36
   const priceY   = nameY + nameLns.length * nameLineH + 4
 
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  const svg = `<svg width="${iW}" height="${iH}" xmlns="http://www.w3.org/2000/svg">
   <style>${ff}</style>
   <!-- 半透明グラデーション帯 -->
   <defs>
@@ -840,7 +846,7 @@ export async function addSlide2Overlay(
       <stop offset="100%" stop-color="rgba(0,0,0,0.72)" />
     </linearGradient>
   </defs>
-  <rect x="0" y="${bandY - 60}" width="${W}" height="${BAND_H + 60}" fill="url(#band)"/>
+  <rect x="0" y="${bandY - 60}" width="${iW}" height="${BAND_H + 60}" fill="url(#band)"/>
   <!-- 商品名 -->
   ${nameLns.map((l, i) => `<text x="40" y="${nameY + i * nameLineH}" font-family="${MFONT}" font-size="36" font-weight="800" fill="white">${esc(l)}</text>`).join("")}
   <!-- 価格 -->
