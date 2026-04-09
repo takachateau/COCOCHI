@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   pruneOldJobs()
 
-  const job = createJob()
+  const job = await createJob()
   processJob(job.id, body).catch(err => {
     updateJob(job.id, { status: "error", error: String(err) })
   })
