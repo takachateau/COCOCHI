@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getJob } from "@/lib/jobs"
+import { getJob, getJobFromBlob } from "@/lib/jobs"
 
 export const runtime = "nodejs"
 
@@ -8,7 +8,9 @@ export async function GET(
   { params }: { params: Promise<{ jobId: string }> },
 ) {
   const { jobId } = await params
-  const job = getJob(jobId)
+
+  // まずメモリ（同一インスタンスなら高速）、なければ Blob から取得
+  const job = getJob(jobId) ?? await getJobFromBlob(jobId)
 
   if (!job) {
     return NextResponse.json({ error: "ジョブが見つかりません" }, { status: 404 })
