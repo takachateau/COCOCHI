@@ -74,29 +74,40 @@ async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffe
     return await withRetry(async () => {
       type FalResult = { images: { url: string }[] }
 
-      const baseInput = {
-        prompt,
-        aspect_ratio: "3:4",
-        resolution: "1K",
-        output_format: "jpeg",
+      // 画像ありの場合は FLUX Kontext Multi（スタイル+内容を分離して理解できる）
+      // 画像なしの場合は nano-banana-2（テキストのみ生成）
+      if (imageUrls.length > 0) {
+        const input = {
+          prompt,
+          image_urls: imageUrls,
+          output_format: "jpeg" as const,
+        }
+        console.log(`[FAL] calling model: fal-ai/flux-pro/kontext/multi, images: ${imageUrls.length}`)
+        const res = await fal.subscribe("fal-ai/flux-pro/kontext/multi", { input })
+        const resultData = res.data as FalResult
+        const imageUrl = resultData?.images?.[0]?.url
+        if (!imageUrl) throw new Error("FAL: 画像URLが取得できません")
+        console.log(`[FAL] 生成完了: ${imageUrl.slice(0, 60)}...`)
+        const dl = await fetch(imageUrl)
+        if (!dl.ok) throw new Error(`FAL: 画像DL失敗 ${dl.status}`)
+        return Buffer.from(await dl.arrayBuffer())
+      } else {
+        const input = {
+          prompt,
+          aspect_ratio: "3:4",
+          resolution: "1K",
+          output_format: "jpeg",
+        }
+        console.log(`[FAL] calling model: fal-ai/nano-banana-2 (text only)`)
+        const res = await fal.subscribe("fal-ai/nano-banana-2", { input })
+        const resultData = res.data as FalResult
+        const imageUrl = resultData?.images?.[0]?.url
+        if (!imageUrl) throw new Error("FAL: 画像URLが取得できません")
+        console.log(`[FAL] 生成完了: ${imageUrl.slice(0, 60)}...`)
+        const dl = await fetch(imageUrl)
+        if (!dl.ok) throw new Error(`FAL: 画像DL失敗 ${dl.status}`)
+        return Buffer.from(await dl.arrayBuffer())
       }
-
-      const model = imageUrls.length > 0 ? "fal-ai/nano-banana-2/edit" : "fal-ai/nano-banana-2"
-      const input = imageUrls.length > 0
-        ? { ...baseInput, image_urls: imageUrls }
-        : baseInput
-
-      console.log(`[FAL] calling model: ${model}, imageUrls: ${imageUrls.length}`)
-      const res = await fal.subscribe(model, { input })
-      const resultData = res.data as FalResult
-
-      const imageUrl = resultData?.images?.[0]?.url
-      if (!imageUrl) throw new Error("FAL: 画像URLが取得できません")
-      console.log(`[FAL] 生成完了: ${imageUrl.slice(0, 60)}...`)
-
-      const dl = await fetch(imageUrl)
-      if (!dl.ok) throw new Error(`FAL: 画像DL失敗 ${dl.status}`)
-      return Buffer.from(await dl.arrayBuffer())
     })
   } finally {
     sem.release()
@@ -117,30 +128,37 @@ export interface UGCCoverParams {
   instruction?: string
 }
 
-/** スライド1（表紙）を FAL FLUX で生成 */
+/** スライド1（表紙）を FAL FLUX Kontext で生成 */
 export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> {
   const { productName, headline, tag, patternName, colorPalette, productImageBase64, refImageUrl, styleDescription, instruction } = params
   const tone      = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
-  const styleNote = styleDescription ? `Visual style to match exactly: ${styleDescription}.` : ""
 
   // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
 
+  // Kontext向けプロンプト:
+  // image_urls[0] = 商品画像（内容の参照）
+  // image_urls[1] = 参照スライド（スタイルの参照）
+  // 「画像1の商品を使って、画像2のスタイルでInstagramスライドを作れ」という指示形式
+  const styleGuide = styleDescription
+    ? `Match the visual style of the second reference image exactly: ${styleDescription}.`
+    : "Use a clean Japanese UGC beauty aesthetic."
+
   if (patternName === "記事投稿型") {
-    const prompt = `${styleNote} Japanese beauty lifestyle Instagram cover, aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible. Large bold Japanese title text: "${headline}", small stylish tag: "${tag}". ${tone} colors, editorial magazine quality. Portrait orientation. ${NO_UI}`
-    return generateImage(prompt, refImageUrl ? [refImageUrl] : [])
+    const prompt = `Create a Japanese beauty lifestyle Instagram cover slide. ${styleGuide} The scene should feel like a morning vanity or botanical shelf with soft window light. No product in the scene. Include large bold Japanese title text: "${headline}" and small tag: "${tag}". ${tone} color palette. Portrait orientation. ${NO_UI}`
+    return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
   }
 
   let prompt: string
   if (patternName === "手持ちUGC型") {
-    prompt = `${styleNote} Authentic Japanese UGC-style Instagram photo featuring the exact skincare product shown in the reference image. The product must be clearly visible — held in hand or being applied to skin (close-up hands only). ${tone} color tones, natural soft lighting, genuine user-generated content feel. Large bold Japanese text overlay: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Using the product from the first image, create a Japanese UGC-style Instagram cover slide in the visual style of the second image. The product must be held in hand or applied to skin (close-up hands only, no face). ${styleGuide} ${tone} tones, natural soft lighting. Include large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else if (patternName === "直置きUGC型") {
-    prompt = `${styleNote} Authentic Japanese UGC-style Instagram photo featuring the exact skincare product shown in the reference image. The product must be resting on a surface — placed on a desk, wooden shelf, bathroom counter, or fluffy rug. Do NOT show hands holding the product. ${tone} color tones, natural soft lighting, genuine user-generated content feel. Large bold Japanese text overlay: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Using the product from the first image, create a Japanese UGC-style Instagram cover slide in the visual style of the second image. The product must be placed on a surface (desk, shelf, or bathroom counter) — no hands. ${styleGuide} ${tone} tones, natural soft lighting. Include large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `${styleNote} Japanese beauty Instagram photo featuring the exact product shown in the reference image. The product must appear naturally in the scene — on a shelf, vanity, or surrounded by botanical props. ${tone} colors, soft natural lighting, cozy minimal aesthetic. Large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Using the product from the first image, create a Japanese beauty Instagram cover slide in the visual style of the second image. The product appears naturally in the scene. ${styleGuide} ${tone} colors, soft natural lighting. Include large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   }
 
-  if (instruction) prompt += ` Additional style note: ${instruction}`
+  if (instruction) prompt += ` ${instruction}`
 
   const imageUrls = [productUrl, ...(refImageUrl ? [refImageUrl] : [])]
   return generateImage(prompt, imageUrls)
@@ -164,33 +182,33 @@ export interface ContentSlideParams {
   instruction?: string
 }
 
-/** スライド2〜5（コンテンツ）を FAL FLUX で生成 */
+/** スライド2〜5（コンテンツ）を FAL FLUX Kontext で生成 */
 export async function generateContentSlide(params: ContentSlideParams): Promise<Buffer> {
   const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, refImageUrl, styleDescription, instruction } = params
   const tone      = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
-  const styleNote = styleDescription ? `Visual style to match exactly: ${styleDescription}.` : ""
 
   // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_s${slideNumber}_${Date.now()}.jpg`)
 
   const bulletText = bullets?.join(" / ") ?? ""
   const accentText = accent ?? ""
+  const styleGuide = styleDescription
+    ? `Match the visual style of the second reference image exactly: ${styleDescription}.`
+    : "Use a clean Japanese UGC beauty aesthetic."
 
-  // slide 2 は商品名・価格をFAL生成に含める（Sharpオーバーレイ不要）
-  const slide2Text = slideNumber === 2 && price
-    ? ` Prominently display product name "${productName}" and price "${price}" as bold styled Japanese text in the image, integrated naturally into the design like a UGC price card.`
-    : slideNumber === 2
-    ? ` Prominently display product name "${productName}" as bold styled Japanese text in the image.`
+  // slide 2: 商品名・価格をFAL生成に含める（Sharpオーバーレイ不要）
+  const slide2Text = slideNumber === 2
+    ? ` Prominently include product name "${productName}"${price ? ` and price "${price}"` : ""} as bold styled Japanese text, integrated naturally into the design.`
     : ""
 
   let prompt: string
   if (patternName === "直置きUGC型") {
-    prompt = `${styleNote} Authentic Japanese UGC-style Instagram carousel slide featuring the exact skincare product shown in the reference image. The product must be clearly visible — placed on a desk, shelf, or bathroom counter (not held in hand). ${tone} color aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `Using the product from the first image, create a Japanese UGC-style Instagram carousel slide in the visual style of the second image. The product must rest on a surface (no hands). ${styleGuide} ${tone} aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent text: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `${styleNote} Japanese Instagram carousel slide photo featuring the exact skincare product shown in the reference image. The product must be clearly visible in the scene — placed on a surface, held close, or applied to skin (close-up hands or skin only). ${tone} color aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `Using the product from the first image, create a Japanese UGC-style Instagram carousel slide in the visual style of the second image. The product must be clearly visible — held in hand, on a surface, or applied to skin. ${styleGuide} ${tone} aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent text: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   }
 
-  if (instruction) prompt += ` Additional style note: ${instruction}`
+  if (instruction) prompt += ` ${instruction}`
 
   const imageUrls = [productUrl, ...(refImageUrl ? [refImageUrl] : [])]
   return generateImage(prompt, imageUrls)
