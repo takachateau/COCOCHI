@@ -1,64 +1,31 @@
 {
-  "_comment": "各参照画像のタグ。colorPalette / angle に基づくマッチングに使用。",
-  "_colorTags": ["pink","blue","green","yellow","purple","orange","teal","mono","white","beige","warm","cool","dark","light","pastel","vivid"],
-  "_moodTags": ["feminine","clean","organic","vitamin","luxury","energetic","spa","editorial","minimal","natural","warm","cozy","fresh","bold","soft"],
-  "_angleTags": ["感情体験","成分・効果","ライフスタイル"],
-
-  "images": {
-    "A_商品切り抜き型/サムネ/1サムネ.jpg":   { "color": ["white","clean","minimal"], "mood": ["editorial","minimal"], "angle": ["成分・効果"] },
-    "A_商品切り抜き型/サムネ/1サムネ 2.jpg": { "color": ["pink","pastel"],           "mood": ["feminine","soft"],    "angle": ["感情体験"] },
-    "A_商品切り抜き型/サムネ/1サムネ 3.jpg": { "color": ["beige","warm"],            "mood": ["natural","cozy"],     "angle": ["ライフスタイル"] },
-    "A_商品切り抜き型/サムネ/1サムネ 4.jpg": { "color": ["white","light"],           "mood": ["clean","minimal"],    "angle": ["成分・効果"] },
-
-    "A_商品切り抜き型/post1/1サムネ.jpg":    { "color": ["white","clean"],           "mood": ["editorial","minimal"], "angle": ["成分・効果"] },
-    "A_商品切り抜き型/post2/1サムネ.jpg":    { "color": ["pink","pastel"],           "mood": ["feminine","soft"],     "angle": ["感情体験"] },
-    "A_商品切り抜き型/post3/1サムネ.jpg":    { "color": ["beige","warm"],            "mood": ["natural","cozy"],      "angle": ["ライフスタイル"] },
-    "A_商品切り抜き型/post4/1サムネ.jpg":    { "color": ["white","light"],           "mood": ["clean","fresh"],       "angle": ["成分・効果"] },
-
-    "B_手持ちUGC型/サムネ/1サムネ.jpg":      { "color": ["pink","warm"],             "mood": ["feminine","natural"],  "angle": ["感情体験"] },
-    "B_手持ちUGC型/サムネ/1サムネ 2.jpg":    { "color": ["beige","pastel"],          "mood": ["soft","cozy"],         "angle": ["ライフスタイル"] },
-    "B_手持ちUGC型/サムネ/スクリーンショット 2026-03-28 19.12.55.png": { "color": ["white","clean"], "mood": ["minimal","fresh"], "angle": ["成分・効果"] },
-    "B_手持ちUGC型/サムネ/スクリーンショット 2026-03-28 19.13.11.png": { "color": ["pink","warm"],  "mood": ["feminine","soft"], "angle": ["感情体験"] },
-    "B_手持ちUGC型/サムネ/スクリーンショット 2026-03-28 19.16.52.png": { "color": ["beige","natural"],"mood": ["organic","cozy"],"angle": ["ライフスタイル"] },
-    "B_手持ちUGC型/サムネ/スクリーンショット 2026-03-28 19.16.58.png": { "color": ["white","light"], "mood": ["clean","editorial"],"angle": ["成分・効果"] },
-    "B_手持ちUGC型/サムネ/スクリーンショット 2026-03-28 19.17.08.png": { "color": ["pink","pastel"], "mood": ["feminine","warm"], "angle": ["感情体験"] },
-    "B_手持ちUGC型/サムネ/スクリーンショット 2026-03-28 19.27.00.png": { "color": ["beige","warm"],  "mood": ["natural","soft"],  "angle": ["ライフスタイル"] },
-
-    "B_手持ちUGC型/post1/1サムネ.jpg":       { "color": ["pink","warm"],             "mood": ["feminine","natural"],  "angle": ["感情体験"] },
-    "B_手持ちUGC型/post3/1サムネ.jpg":       { "color": ["beige","pastel"],          "mood": ["cozy","soft"],         "angle": ["ライフスタイル"] },
-    "B_手持ちUGC型/post4/1サムネ.jpg":       { "color": ["white","clean"],           "mood": ["minimal","fresh"],     "angle": ["成分・効果"] },
-    "B_手持ちUGC型/post7/1サムネ.jpg":       { "color": ["warm","orange"],           "mood": ["energetic","bold"],    "angle": ["感情体験"] },
-
-    "C_直置きUGC型/サムネ/1サムネ.jpg":      { "color": ["white","clean"],           "mood": ["minimal","spa"],       "angle": ["成分・効果"] },
-    "C_直置きUGC型/サムネ/1サムネ 2.jpg":    { "color": ["green","natural"],         "mood": ["organic","fresh"],     "angle": ["ライフスタイル"] },
-    "C_直置きUGC型/サムネ/1サムネ 3.jpg":    { "color": ["beige","warm"],            "mood": ["cozy","natural"],      "angle": ["感情体験"] },
-    "C_直置きUGC型/サムネ/スクリーンショット 2026-03-28 19.16.58.png": { "color": ["white","light"], "mood": ["clean","editorial"], "angle": ["成分・効果"] },
-
-    "C_直置きUGC型/post2/1サムネ.jpg":       { "color": ["white","clean"],           "mood": ["minimal","editorial"], "angle": ["成分・効果"] },
-    "C_直置きUGC型/post5/1サムネ.jpg":       { "color": ["green","natural"],         "mood": ["organic","fresh"],     "angle": ["ライフスタイル"] },
-    "C_直置きUGC型/post6/1サムネ.jpg":       { "color": ["beige","warm"],            "mood": ["cozy","natural"],      "angle": ["感情体験"] },
-
-    "D_記事投稿型/サムネ/1.jpg":              { "color": ["white","light"],           "mood": ["editorial","clean"],   "angle": ["成分・効果"] },
-    "D_記事投稿型/サムネ/1サムネ.jpg":        { "color": ["pink","pastel"],           "mood": ["feminine","soft"],     "angle": ["感情体験"] },
-
-    "D_記事投稿型/post1/1.jpg":               { "color": ["white","editorial"],       "mood": ["minimal","bold"],      "angle": ["成分・効果"] },
-    "D_記事投稿型/post2/1サムネ.jpg":         { "color": ["pink","warm"],             "mood": ["feminine","cozy"],     "angle": ["感情体験"] }
-  },
-
-  "_colorPaletteMap": {
-    "pink":   ["pink","warm","pastel","feminine"],
-    "blue":   ["blue","cool","clean","fresh","light"],
-    "green":  ["green","natural","organic","fresh"],
-    "yellow": ["yellow","vitamin","vivid","warm","bright"],
-    "purple": ["purple","luxury","cool","dark"],
-    "orange": ["orange","warm","energetic","vivid"],
-    "teal":   ["teal","spa","clean","cool","minimal"],
-    "mono":   ["mono","white","editorial","minimal","dark"]
-  },
-
-  "_angleMap": {
-    "感情体験":   ["感情体験","feminine","warm","cozy","soft","bold"],
-    "成分・効果": ["成分・効果","clean","minimal","editorial","fresh"],
-    "ライフスタイル": ["ライフスタイル","natural","organic","cozy","lifestyle"]
+  "posts": {
+    "B_手持ちUGC型/post1": {
+      "mood": "pop"
+    },
+    "B_手持ちUGC型/post2": {
+      "mood": "pop"
+    },
+    "B_手持ちUGC型/post3": {
+      "mood": "pop"
+    },
+    "B_手持ちUGC型/post4": {
+      "mood": "pop"
+    },
+    "C_直置きUGC型/post1": {
+      "mood": "pop"
+    },
+    "C_直置きUGC型/post2": {
+      "mood": "pop"
+    },
+    "C_直置きUGC型/post3": {
+      "mood": "pop"
+    },
+    "D_記事投稿型/post1": {
+      "mood": "pop"
+    },
+    "D_記事投稿型/post2": {
+      "mood": "natural"
+    }
   }
 }

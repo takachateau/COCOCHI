@@ -30,12 +30,6 @@ const COLOR_TONES: Record<string, string> = {
   mono:   "black and white minimal stylish editorial",
 }
 
-// パターン別参照画像フォルダ
-const REF_DIRS: Record<string, string> = {
-  "手持ちUGC型": "reference/B_手持ちUGC型",
-  "直置きUGC型": "reference/C_直置きUGC型",
-  "記事投稿型":  "reference/D_記事投稿型",
-}
 
 // ─── 同時実行制御 + リトライ ──────────────────────────────────────
 
@@ -72,44 +66,6 @@ async function uploadBlob(buf: Buffer, name: string, ct = "image/jpeg"): Promise
   return url
 }
 
-/** パターンのサムネフォルダからランダムに1枚選択 */
-function pickThumbImage(patternName: string): Buffer | null {
-  const dir = REF_DIRS[patternName]
-  if (!dir) return null
-  const thumbDir = path.join(process.cwd(), dir, "サムネ")
-  try {
-    const files = fs.readdirSync(thumbDir).filter(f => /\.(jpg|jpeg|png)$/i.test(f))
-    if (files.length === 0) return null
-    const file = files[Math.floor(Math.random() * files.length)]
-    return fs.readFileSync(path.join(thumbDir, file))
-  } catch {
-    return null
-  }
-}
-
-/** パターンのpostフォルダからスライド番号に対応する画像を選択 */
-function pickPostImage(patternName: string, slideNumber: number): Buffer | null {
-  const dir = REF_DIRS[patternName]
-  if (!dir) return null
-  const baseDir = path.join(process.cwd(), dir)
-  try {
-    // postフォルダ一覧をランダム順で取得
-    const posts = fs.readdirSync(baseDir).filter(d => d.startsWith("post"))
-    if (posts.length === 0) return null
-    const post = posts[Math.floor(Math.random() * posts.length)]
-    const postDir = path.join(baseDir, post)
-    // slideNumber に対応するファイル（2.jpg, 3.jpg …）
-    const target = `${slideNumber}.jpg`
-    const filePath = path.join(postDir, target)
-    if (fs.existsSync(filePath)) return fs.readFileSync(filePath)
-    // なければ最初の画像を返す
-    const files = fs.readdirSync(postDir).filter(f => /\.(jpg|jpeg|png)$/i.test(f))
-    if (files.length === 0) return null
-    return fs.readFileSync(path.join(postDir, files[0]))
-  } catch {
-    return null
-  }
-}
 
 /** FAL で画像を1枚生成して Buffer を返す（セマフォ + リトライ済み） */
 async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffer> {
@@ -156,24 +112,21 @@ export interface UGCCoverParams {
   patternName: string
   colorPalette: string
   productImageBase64: string
+  refImageUrl?: string   // reference.ts が選択・アップロード済みのURL
   instruction?: string
 }
 
 /** スライド1（表紙）を FAL FLUX で生成 */
 export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> {
-  const { productName, headline, tag, patternName, colorPalette, productImageBase64, instruction } = params
+  const { productName, headline, tag, patternName, colorPalette, productImageBase64, refImageUrl, instruction } = params
   const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
 
   // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
 
-  // 参照サムネを取得してBlobにアップ
-  const refBuf = pickThumbImage(patternName)
-  const refUrl = refBuf ? await uploadBlob(refBuf, `ref_thumb_${Date.now()}.jpg`) : null
-
   if (patternName === "記事投稿型") {
     const prompt = `Japanese beauty lifestyle Instagram cover, aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible. Large bold Japanese title text: "${headline}", small stylish tag: "${tag}". ${tone} colors, editorial magazine quality. Portrait orientation. ${NO_UI}`
-    return generateImage(prompt, refUrl ? [refUrl] : [])
+    return generateImage(prompt, refImageUrl ? [refImageUrl] : [])
   }
 
   let prompt: string
@@ -187,7 +140,7 @@ export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> 
 
   if (instruction) prompt += ` Additional style note: ${instruction}`
 
-  const imageUrls = [productUrl, ...(refUrl ? [refUrl] : [])]
+  const imageUrls = [productUrl, ...(refImageUrl ? [refImageUrl] : [])]
   return generateImage(prompt, imageUrls)
 }
 
@@ -204,34 +157,37 @@ export interface ContentSlideParams {
   patternName: string
   colorPalette: string
   productImageBase64: string
+  refImageUrl?: string   // reference.ts が選択・アップロード済みのURL
   instruction?: string
 }
 
 /** スライド2〜5（コンテンツ）を FAL FLUX で生成 */
 export async function generateContentSlide(params: ContentSlideParams): Promise<Buffer> {
-  const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, instruction } = params
+  const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, refImageUrl, instruction } = params
   const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
 
   // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_s${slideNumber}_${Date.now()}.jpg`)
 
-  // 参照画像を取得してBlobにアップ
-  const refBuf = pickPostImage(patternName, slideNumber)
-  const refUrl = refBuf ? await uploadBlob(refBuf, `ref_post_s${slideNumber}_${Date.now()}.jpg`) : null
-
   const bulletText = bullets?.join(" / ") ?? ""
   const accentText = accent ?? ""
-  const priceText = price ? `price tag showing ${price}` : ""
+
+  // slide 2 は商品名・価格をFAL生成に含める（Sharpオーバーレイ不要）
+  const slide2Text = slideNumber === 2 && price
+    ? ` Prominently display product name "${productName}" and price "${price}" as bold styled Japanese text in the image, integrated naturally into the design like a UGC price card.`
+    : slideNumber === 2
+    ? ` Prominently display product name "${productName}" as bold styled Japanese text in the image.`
+    : ""
 
   let prompt: string
   if (patternName === "直置きUGC型") {
-    prompt = `Authentic Japanese UGC-style Instagram carousel slide featuring the exact skincare product shown in the reference image. The product must be clearly visible — placed on a desk, shelf, or bathroom counter (not held in hand). ${tone} color aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}${priceText ? `, ${priceText}` : ""}. Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram carousel slide featuring the exact skincare product shown in the reference image. The product must be clearly visible — placed on a desk, shelf, or bathroom counter (not held in hand). ${tone} color aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `Japanese Instagram carousel slide photo featuring the exact skincare product shown in the reference image. The product must be clearly visible in the scene — placed on a surface, held close, or applied to skin (close-up hands or skin only). ${tone} color aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}${priceText ? `, ${priceText}` : ""}. Portrait orientation. ${NO_UI}`
+    prompt = `Japanese Instagram carousel slide photo featuring the exact skincare product shown in the reference image. The product must be clearly visible in the scene — placed on a surface, held close, or applied to skin (close-up hands or skin only). ${tone} color aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   }
 
   if (instruction) prompt += ` Additional style note: ${instruction}`
 
-  const imageUrls = [productUrl, ...(refUrl ? [refUrl] : [])]
+  const imageUrls = [productUrl, ...(refImageUrl ? [refImageUrl] : [])]
   return generateImage(prompt, imageUrls)
 }

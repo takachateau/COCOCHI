@@ -1,131 +1,230 @@
 /**
- * reference/ フォルダ全体を対象に、colorPalette / angle でマッチングして参照画像を返す。
+ * reference.ts — 参考画像選択・マッピングモジュール（v2）
  *
- * - metadata.json のタグとスコアリングで最適な画像を選択
- * - マッチするものがなければ全画像からランダム
- * - .mp4 などの動画ファイルは除外
+ * フロー:
+ *   1. detectMood()         — 商品説明 → Claude でムード判定
+ *   2. selectPostFolder()   — パターン × ムード → postフォルダをランダム選択
+ *   3. mapSlidesToRefs()    — Claude Vision でpostフォルダ内画像をスライドにマッピング
+ *   4. uploadRefMapping()   — マッピング画像を Vercel Blob にアップロードしてURL化
  */
 
+import Anthropic from "@anthropic-ai/sdk"
+import { put } from "@vercel/blob"
 import fs from "fs"
 import path from "path"
 
-// ─── メタデータ型 ────────────────────────────────────────────────
+const REF_DIR = path.join(process.cwd(), "reference")
 
-interface ImageMeta {
-  color: string[]
-  mood:  string[]
-  angle: string[]
+const PATTERN_DIR: Record<string, string> = {
+  "手持ちUGC型": "B_手持ちUGC型",
+  "直置きUGC型": "C_直置きUGC型",
+  "記事投稿型":  "D_記事投稿型",
 }
+
+const MOODS = ["natural", "luxury", "pop", "cool"] as const
+export type Mood = typeof MOODS[number]
 
 interface Metadata {
-  images: Record<string, ImageMeta>
-  _colorPaletteMap: Record<string, string[]>
-  _angleMap:        Record<string, string[]>
+  posts: Record<string, { mood: string }>
 }
 
-// ─── メタデータ読み込み（起動時に1回だけ） ────────────────────────
-
-let _meta: Metadata | null = null
-
-function loadMeta(): Metadata {
-  if (_meta) return _meta
+// metadata.jsonはリクエストごとに読み直す（タグ追加に即対応）
+function loadMetadata(): Metadata {
   try {
-    const metaPath = path.join(process.cwd(), "reference", "metadata.json")
-    _meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as Metadata
+    const raw = fs.readFileSync(path.join(REF_DIR, "metadata.json"), "utf8")
+    return JSON.parse(raw)
   } catch {
-    _meta = { images: {}, _colorPaletteMap: {}, _angleMap: {} }
+    return { posts: {} }
   }
-  return _meta
 }
 
-// ─── reference/ 以下の全画像パスを収集（起動時に1回だけ） ───────────
+function claude() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+}
 
-const IMAGE_EXT = /\.(jpe?g|png|webp)$/i
+// ─── 1. ムード判定 ────────────────────────────────────────────────
 
-let _cachedImages: string[] | null = null
+/** 商品説明からInstagramビジュアルのムードを推定 */
+export async function detectMood(description: string): Promise<Mood> {
+  try {
+    const res = await claude().messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 32,
+      messages: [{
+        role: "user",
+        content: `以下のコスメ商品説明を読んで、最も合うInstagramビジュアルのムードを1単語で答えてください。
 
-function collectAllImages(baseDir: string): string[] {
-  if (_cachedImages) return _cachedImages
-  const results: string[] = []
-  function walk(dir: string) {
-    if (!fs.existsSync(dir)) return
-    for (const entry of fs.readdirSync(dir)) {
-      if (entry.startsWith(".")) continue
-      const full = path.join(dir, entry)
-      const stat = fs.statSync(full)
-      if (stat.isDirectory()) {
-        walk(full)
-      } else if (IMAGE_EXT.test(entry)) {
-        results.push(full)
-      }
+商品説明: ${description}
+
+選択肢（1つだけ回答）:
+- natural（ナチュラル・ミニマル・オーガニック系）
+- luxury（ラグジュアリー・高級・洗練系）
+- pop（ポップ・明るい・カラフル・元気系）
+- cool（クール・スタイリッシュ・都会的）
+
+1単語のみ:`,
+      }],
+    })
+    const block = res.content[0]
+    const text  = block.type === "text" ? block.text.trim().toLowerCase() : ""
+    return (MOODS.find(m => text.includes(m)) ?? "natural") as Mood
+  } catch {
+    return "natural"
+  }
+}
+
+// ─── 2. postフォルダ選択 ──────────────────────────────────────────
+
+/** パターン × ムードでpostフォルダキーをランダム選択（該当なければ任意） */
+export function selectPostFolder(patternName: string, mood: Mood): string | null {
+  const meta   = loadMetadata()
+  const dirKey = PATTERN_DIR[patternName]
+  if (!dirKey) return null
+
+  const all = Object.entries(meta.posts).filter(([k]) => k.startsWith(dirKey))
+  if (all.length === 0) return null
+
+  const matched = all.filter(([, v]) => v.mood === mood)
+  const pool    = matched.length > 0 ? matched : all
+  return pool[Math.floor(Math.random() * pool.length)][0]
+}
+
+// ─── 3. スライド→参照画像マッピング ─────────────────────────────
+
+export interface SlideInfo {
+  slideNumber: number
+  headline:   string
+  tag:        string
+  bullets?:   string[]
+}
+
+export interface ReferenceMapping {
+  thumbnailPath: string             // slide 1 用（絶対パス）
+  slideMap: Record<number, string>  // slideNumber → 絶対パス
+}
+
+/**
+ * Claude Vision でpostフォルダ内の画像をスライドにマッピング
+ * - slide 1 → 01_thumbnail.jpg（固定）
+ * - slides 2〜5 → Claudeがコンテンツ内容を読んで最適な画像を選択
+ */
+export async function mapSlidesToRefs(
+  postFolderKey: string,
+  slides: SlideInfo[],
+): Promise<ReferenceMapping> {
+  const folderPath = path.join(REF_DIR, postFolderKey)
+  const allFiles = fs.readdirSync(folderPath)
+    .filter(f => /\.(jpg|jpeg|png)$/i.test(f) && !f.startsWith("."))
+    .sort()
+
+  const thumbnailFile = allFiles.find(f => f.startsWith("01_thumbnail"))
+  const contentFiles  = allFiles.filter(f => !f.startsWith("01_thumbnail"))
+  const thumbnailPath = path.join(folderPath, thumbnailFile ?? allFiles[0])
+
+  // コンテンツ画像がなければサムネで代替
+  if (contentFiles.length === 0) {
+    return {
+      thumbnailPath,
+      slideMap: Object.fromEntries(slides.map(s => [s.slideNumber, thumbnailPath])),
     }
   }
-  walk(baseDir)
-  _cachedImages = results
-  return results
-}
 
-// ─── スコアリング ────────────────────────────────────────────────
+  // Claude Vision で一括マッピング
+  const imageBlocks = contentFiles.map(file => ({
+    type: "image" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "image/jpeg" as const,
+      data: fs.readFileSync(path.join(folderPath, file)).toString("base64"),
+    },
+  }))
 
-/**
- * colorPalette / angle から検索キーワードリストを生成
- */
-function buildSearchKeywords(colorPalette: string, angle: string): string[] {
-  const meta = loadMeta()
-  const colorKeys  = meta._colorPaletteMap[colorPalette] ?? [colorPalette]
-  const angleKeys  = meta._angleMap[angle]               ?? [angle]
-  return [...new Set([...colorKeys, ...angleKeys])]
-}
+  const slideDescs = slides
+    .map(s =>
+      `スライド${s.slideNumber}「${s.headline}」タグ:${s.tag}` +
+      (s.bullets ? ` 内容:${s.bullets.join("/")}` : "")
+    )
+    .join("\n")
 
-/**
- * 画像パスとメタデータのタグをキーワードリストで採点
- * relPath: "B_手持ちUGC型/post1/1サムネ.jpg" 形式
- */
-function scoreImage(relPath: string, keywords: string[]): number {
-  const meta   = loadMeta()
-  const imgMeta = meta.images[relPath]
-  if (!imgMeta) return 0
+  const fileList   = contentFiles.map((f, i) => `画像${i + 1}:${f}`).join(", ")
+  const exampleJson = `{${slides.map(s => `"${s.slideNumber}":"ファイル名"`).join(",")}}`
 
-  const allTags = [...imgMeta.color, ...imgMeta.mood, ...imgMeta.angle]
-  return keywords.filter(k => allTags.includes(k)).length
-}
-
-// ─── 公開 API ─────────────────────────────────────────────────────
-
-export interface PickReferenceOptions {
-  colorPalette: string   // "pink" | "blue" | ...
-  angle:        string   // "感情体験" | "成分・効果" | "ライフスタイル"
-}
-
-/**
- * reference/ 全画像から colorPalette / angle に最もマッチする1枚を返す。
- * マッチがなければランダム。
- */
-export function pickReferenceImage(opts: PickReferenceOptions): Buffer | null {
-  const refDir  = path.join(process.cwd(), "reference")
-  const allPaths = collectAllImages(refDir)
-  if (!allPaths.length) return null
-
-  const keywords = buildSearchKeywords(opts.colorPalette, opts.angle)
-
-  // relPath（"A_.../post1/1サムネ.jpg"）でスコアリング
-  const scored = allPaths.map(fullPath => {
-    const relPath = path.relative(refDir, fullPath).replace(/\\/g, "/")
-    return { fullPath, score: scoreImage(relPath, keywords) }
-  })
-
-  // スコア最大のものをまとめ、同点はランダムに1つ選ぶ
-  const maxScore = Math.max(...scored.map(s => s.score))
-  const candidates = maxScore > 0
-    ? scored.filter(s => s.score === maxScore)
-    : scored  // スコア0でも全画像からランダム
-
-  const picked = candidates[Math.floor(Math.random() * candidates.length)]
-  console.log(`[reference] picked: ${path.relative(refDir, picked.fullPath)} (score=${picked.score}, keywords=${keywords.join(",")})`)
+  const slideMap: Record<number, string> = {}
 
   try {
-    return fs.readFileSync(picked.fullPath)
-  } catch {
-    return null
+    const res = await claude().messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 256,
+      messages: [{
+        role: "user",
+        content: [
+          ...imageBlocks,
+          {
+            type: "text",
+            text: `${contentFiles.length}枚の参考画像（${fileList}）と、以下のInstagramスライド内容を照合して、各スライドに最もビジュアルスタイルが合う画像ファイル名をJSONで返してください。画像のレイアウト・雰囲気・情報密度が近いものを選んでください。
+
+${slideDescs}
+
+JSONのみ回答（他のテキスト不要）:
+${exampleJson}`,
+          },
+        ],
+      }],
+    })
+
+    const block0 = res.content[0]
+    const parsed = JSON.parse(block0.type === "text" ? block0.text.trim() : "{}")
+    for (const [k, v] of Object.entries(parsed)) {
+      const filePath = path.join(folderPath, v as string)
+      if (fs.existsSync(filePath)) slideMap[Number(k)] = filePath
+    }
+    console.log(`[reference] Claude Vision マッピング成功: ${postFolderKey}`, Object.entries(slideMap).map(([k,v]) => `${k}→${path.basename(v)}`).join(", "))
+  } catch (e) {
+    console.warn("[reference] Claude Vision マッピング失敗、順番割り当てにフォールバック", e)
   }
+
+  // 未マッピングのスライドを順番割り当てで補完
+  slides.forEach((s, i) => {
+    if (!slideMap[s.slideNumber]) {
+      slideMap[s.slideNumber] = path.join(folderPath, contentFiles[i % contentFiles.length])
+    }
+  })
+
+  return { thumbnailPath, slideMap }
+}
+
+// ─── 4. Vercel Blob アップロード ─────────────────────────────────
+
+export interface UploadedRefMapping {
+  thumbnailUrl: string
+  slideUrlMap:  Record<number, string>  // slideNumber → URL
+}
+
+/** ReferenceMapping の画像を Vercel Blob にアップロードしてURL化 */
+export async function uploadRefMapping(
+  mapping: ReferenceMapping,
+): Promise<UploadedRefMapping> {
+  const ts = Date.now()
+
+  const thumbBuf = fs.readFileSync(mapping.thumbnailPath)
+  const { url: thumbnailUrl } = await put(
+    `cocochi/ref/thumb_${ts}.jpg`,
+    thumbBuf,
+    { access: "public", contentType: "image/jpeg", addRandomSuffix: true },
+  )
+
+  const slideUrlMap: Record<number, string> = {}
+  await Promise.all(
+    Object.entries(mapping.slideMap).map(async ([slideNum, filePath]) => {
+      const buf = fs.readFileSync(filePath)
+      const { url } = await put(
+        `cocochi/ref/s${slideNum}_${ts}.jpg`,
+        buf,
+        { access: "public", contentType: "image/jpeg", addRandomSuffix: true },
+      )
+      slideUrlMap[Number(slideNum)] = url
+    })
+  )
+
+  return { thumbnailUrl, slideUrlMap }
 }

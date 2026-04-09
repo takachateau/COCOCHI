@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateArticle, qcScore } from "@/lib/claude"
 import { generateUGCCover, generateContentSlide } from "@/lib/fal"
-import { renderTemplateCover, renderTemplateContentSlide, addSlide2Overlay } from "@/lib/slides"
+import { renderTemplateCover, renderTemplateContentSlide } from "@/lib/slides"
+import { detectMood, selectPostFolder, mapSlidesToRefs, uploadRefMapping } from "@/lib/reference"
+import type { UploadedRefMapping } from "@/lib/reference"
 import { saveGroup } from "@/lib/storage"
 import { createJob, updateJob, pruneOldJobs } from "@/lib/jobs"
 import type { ProductInput, Post, PostGroup, CostSummary } from "@/types"
@@ -83,7 +85,40 @@ async function processJob(jobId: string, body: ProductInput) {
   const cutoutBuffer = Buffer.from(productImageBase64, "base64")
   const removeBgUsed = false
 
-  // 3. 4パターン × スライド並列生成
+  // 3. ムード判定 + 参照画像マッピング（UGC 3パターン分を並列処理）
+  updateJob(jobId, { progress: "参考スタイルを解析中..." })
+
+  const UGC_PATTERNS = ["手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
+  const mood = await detectMood(`${efficacy} ${howToUse}`)
+  console.log(`[route] detected mood: ${mood}`)
+
+  // 各UGCパターンの参照マッピングを並列で取得
+  const refMappings: Record<string, UploadedRefMapping> = {}
+  await Promise.all(
+    UGC_PATTERNS.map(async patternName => {
+      const articleIdx = ARTICLE_INDICES[PATTERN_NAMES.indexOf(patternName)]
+      const article    = content.articles[articleIdx]
+      const postKey    = selectPostFolder(patternName, mood)
+      if (!postKey) return
+
+      const slides = article.slides.slice(1).map((s, j) => ({
+        slideNumber: j + 2,
+        headline:    s.headline,
+        tag:         s.tag,
+        bullets:     s.bullets,
+      }))
+
+      try {
+        const mapping = await mapSlidesToRefs(postKey, slides)
+        refMappings[patternName] = await uploadRefMapping(mapping)
+        console.log(`[route] ref uploaded for ${patternName}: ${postKey}`)
+      } catch (e) {
+        console.warn(`[route] 参照マッピング失敗 ${patternName}:`, e)
+      }
+    })
+  )
+
+  // 4. 4パターン × スライド並列生成
   updateJob(jobId, { progress: "画像を生成中（2〜4分かかります）..." })
 
   let completedSlides = 0
@@ -96,6 +131,7 @@ async function processJob(jobId: string, body: ProductInput) {
   const postResults = await Promise.all(
     PATTERN_NAMES.map(async (patternName, i) => {
       const article = content.articles[ARTICLE_INDICES[i]]
+      const ref     = refMappings[patternName]  // UGC以外はundefined
 
       let coverImageStr = ""
       let contentBuffers: Buffer[]
@@ -117,11 +153,12 @@ async function processJob(jobId: string, body: ProductInput) {
       } else {
         const coverBuffer = await generateUGCCover({
           productName,
-          headline: article.slides[0].headline,
-          tag: article.slides[0].tag,
+          headline:    article.slides[0].headline,
+          tag:         article.slides[0].tag,
           patternName,
           colorPalette: article.colorPalette,
           productImageBase64,
+          refImageUrl:  ref?.thumbnailUrl,
         })
         completedSlides++
         updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
@@ -129,22 +166,20 @@ async function processJob(jobId: string, body: ProductInput) {
 
         contentBuffers = await Promise.all(
           article.slides.slice(1).map(async (slide, j) => {
-            let buf = await generateContentSlide({
+            const slideNumber = j + 2
+            const buf = await generateContentSlide({
               productName,
-              slideNumber: j + 2,
-              headline: slide.headline,
-              tag: slide.tag,
-              bullets: slide.bullets,
-              accent: slide.accent,
-              price: slide.price,
+              slideNumber,
+              headline:    slide.headline,
+              tag:         slide.tag,
+              bullets:     slide.bullets,
+              accent:      slide.accent,
+              price:        slide.price,
               patternName,
               colorPalette: article.colorPalette,
               productImageBase64,
+              refImageUrl:  ref?.slideUrlMap[slideNumber],
             })
-            // slide 2（j===0）に商品名＋価格オーバーレイを確実に描画
-            if (j === 0) {
-              buf = await addSlide2Overlay(buf, productName, slide.price, article.colorPalette)
-            }
             completedSlides++
             updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
             return buf
