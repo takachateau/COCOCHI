@@ -112,30 +112,32 @@ export interface UGCCoverParams {
   patternName: string
   colorPalette: string
   productImageBase64: string
-  refImageUrl?: string   // reference.ts が選択・アップロード済みのURL
+  refImageUrl?:       string   // reference.ts が選択・アップロード済みのURL
+  styleDescription?:  string   // Claude Vision が生成したスタイル説明文
   instruction?: string
 }
 
 /** スライド1（表紙）を FAL FLUX で生成 */
 export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> {
-  const { productName, headline, tag, patternName, colorPalette, productImageBase64, refImageUrl, instruction } = params
-  const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
+  const { productName, headline, tag, patternName, colorPalette, productImageBase64, refImageUrl, styleDescription, instruction } = params
+  const tone      = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
+  const styleNote = styleDescription ? `Visual style to match exactly: ${styleDescription}.` : ""
 
   // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
 
   if (patternName === "記事投稿型") {
-    const prompt = `Japanese beauty lifestyle Instagram cover, aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible. Large bold Japanese title text: "${headline}", small stylish tag: "${tag}". ${tone} colors, editorial magazine quality. Portrait orientation. ${NO_UI}`
+    const prompt = `${styleNote} Japanese beauty lifestyle Instagram cover, aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible. Large bold Japanese title text: "${headline}", small stylish tag: "${tag}". ${tone} colors, editorial magazine quality. Portrait orientation. ${NO_UI}`
     return generateImage(prompt, refImageUrl ? [refImageUrl] : [])
   }
 
   let prompt: string
   if (patternName === "手持ちUGC型") {
-    prompt = `Authentic Japanese UGC-style Instagram photo featuring the exact skincare product shown in the reference image. The product must be clearly visible — held in hand or being applied to skin (close-up hands only). ${tone} color tones, natural soft lighting, genuine user-generated content feel. Large bold Japanese text overlay: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `${styleNote} Authentic Japanese UGC-style Instagram photo featuring the exact skincare product shown in the reference image. The product must be clearly visible — held in hand or being applied to skin (close-up hands only). ${tone} color tones, natural soft lighting, genuine user-generated content feel. Large bold Japanese text overlay: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else if (patternName === "直置きUGC型") {
-    prompt = `Authentic Japanese UGC-style Instagram photo featuring the exact skincare product shown in the reference image. The product must be resting on a surface — placed on a desk, wooden shelf, bathroom counter, or fluffy rug. Do NOT show hands holding the product. ${tone} color tones, natural soft lighting, genuine user-generated content feel. Large bold Japanese text overlay: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `${styleNote} Authentic Japanese UGC-style Instagram photo featuring the exact skincare product shown in the reference image. The product must be resting on a surface — placed on a desk, wooden shelf, bathroom counter, or fluffy rug. Do NOT show hands holding the product. ${tone} color tones, natural soft lighting, genuine user-generated content feel. Large bold Japanese text overlay: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `Japanese beauty Instagram photo featuring the exact product shown in the reference image. The product must appear naturally in the scene — on a shelf, vanity, or surrounded by botanical props. ${tone} colors, soft natural lighting, cozy minimal aesthetic. Large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `${styleNote} Japanese beauty Instagram photo featuring the exact product shown in the reference image. The product must appear naturally in the scene — on a shelf, vanity, or surrounded by botanical props. ${tone} colors, soft natural lighting, cozy minimal aesthetic. Large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   }
 
   if (instruction) prompt += ` Additional style note: ${instruction}`
@@ -157,14 +159,16 @@ export interface ContentSlideParams {
   patternName: string
   colorPalette: string
   productImageBase64: string
-  refImageUrl?: string   // reference.ts が選択・アップロード済みのURL
+  refImageUrl?:      string   // reference.ts が選択・アップロード済みのURL
+  styleDescription?: string   // Claude Vision が生成したスタイル説明文
   instruction?: string
 }
 
 /** スライド2〜5（コンテンツ）を FAL FLUX で生成 */
 export async function generateContentSlide(params: ContentSlideParams): Promise<Buffer> {
-  const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, refImageUrl, instruction } = params
-  const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
+  const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, refImageUrl, styleDescription, instruction } = params
+  const tone      = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
+  const styleNote = styleDescription ? `Visual style to match exactly: ${styleDescription}.` : ""
 
   // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_s${slideNumber}_${Date.now()}.jpg`)
@@ -181,9 +185,9 @@ export async function generateContentSlide(params: ContentSlideParams): Promise<
 
   let prompt: string
   if (patternName === "直置きUGC型") {
-    prompt = `Authentic Japanese UGC-style Instagram carousel slide featuring the exact skincare product shown in the reference image. The product must be clearly visible — placed on a desk, shelf, or bathroom counter (not held in hand). ${tone} color aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `${styleNote} Authentic Japanese UGC-style Instagram carousel slide featuring the exact skincare product shown in the reference image. The product must be clearly visible — placed on a desk, shelf, or bathroom counter (not held in hand). ${tone} color aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `Japanese Instagram carousel slide photo featuring the exact skincare product shown in the reference image. The product must be clearly visible in the scene — placed on a surface, held close, or applied to skin (close-up hands or skin only). ${tone} color aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `${styleNote} Japanese Instagram carousel slide photo featuring the exact skincare product shown in the reference image. The product must be clearly visible in the scene — placed on a surface, held close, or applied to skin (close-up hands or skin only). ${tone} color aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", small tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   }
 
   if (instruction) prompt += ` Additional style note: ${instruction}`

@@ -195,23 +195,78 @@ ${exampleJson}`,
 
 // ─── 4. Vercel Blob アップロード ─────────────────────────────────
 
-export interface UploadedRefMapping {
-  thumbnailUrl: string
-  slideUrlMap:  Record<number, string>  // slideNumber → URL
+// ─── 4. スタイル言語化 ───────────────────────────────────────────
+
+/**
+ * Claude Vision でpostフォルダのサムネ画像を分析し、
+ * FALプロンプトに挿入するスタイル説明文を生成する
+ */
+async function describeRefStyle(thumbnailPath: string): Promise<string> {
+  const imageData = fs.readFileSync(thumbnailPath).toString("base64")
+
+  try {
+    const res = await claude().messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 256,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/jpeg", data: imageData },
+          },
+          {
+            type: "text",
+            text: `これはInstagramのコスメ系UGC投稿画像です。
+この画像のビジュアルスタイルを、画像生成AIへの英語プロンプトとして使える形で簡潔に説明してください。
+
+含める要素:
+- 色調・カラーパレット（例: warm beige and cream tones）
+- 背景の質感・雰囲気（例: soft natural lighting, minimalist white background）
+- 写真スタイル（例: close-up lifestyle photography, flat lay composition）
+- テキストスタイル（例: bold Japanese typography with thin elegant fonts）
+- 全体のムード（例: clean organic aesthetic, luxury editorial feel）
+
+英語で50単語以内、カンマ区切りのフレーズのみ（説明文不要）:`,
+          },
+        ],
+      }],
+    })
+    const block = res.content[0]
+    return block.type === "text" ? block.text.trim() : ""
+  } catch (e) {
+    console.warn("[reference] スタイル言語化失敗:", e)
+    return ""
+  }
 }
 
-/** ReferenceMapping の画像を Vercel Blob にアップロードしてURL化 */
+// ─── 5. Vercel Blob アップロード ─────────────────────────────────
+
+export interface UploadedRefMapping {
+  thumbnailUrl:     string
+  slideUrlMap:      Record<number, string>  // slideNumber → URL
+  styleDescription: string                  // FALプロンプトに挿入するスタイル説明
+}
+
+/** ReferenceMapping の画像を Vercel Blob にアップロードしてURL化 + スタイル言語化 */
 export async function uploadRefMapping(
   mapping: ReferenceMapping,
 ): Promise<UploadedRefMapping> {
   const ts = Date.now()
 
   const thumbBuf = fs.readFileSync(mapping.thumbnailPath)
-  const { url: thumbnailUrl } = await put(
-    `cocochi/ref/thumb_${ts}.jpg`,
-    thumbBuf,
-    { access: "public", contentType: "image/jpeg", addRandomSuffix: true },
-  )
+
+  // スタイル言語化とBlob uploadを並列実行
+  const [{ url: thumbnailUrl }, styleDescription] = await Promise.all([
+    put(
+      `cocochi/ref/thumb_${ts}.jpg`,
+      thumbBuf,
+      { access: "public", contentType: "image/jpeg", addRandomSuffix: true },
+    ),
+    describeRefStyle(mapping.thumbnailPath),
+  ])
+
+  console.log(`[reference] style description: "${styleDescription}"`)
 
   const slideUrlMap: Record<number, string> = {}
   await Promise.all(
@@ -226,5 +281,5 @@ export async function uploadRefMapping(
     })
   )
 
-  return { thumbnailUrl, slideUrlMap }
+  return { thumbnailUrl, slideUrlMap, styleDescription }
 }

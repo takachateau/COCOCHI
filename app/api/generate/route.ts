@@ -153,12 +153,13 @@ async function processJob(jobId: string, body: ProductInput) {
       } else {
         const coverBuffer = await generateUGCCover({
           productName,
-          headline:    article.slides[0].headline,
-          tag:         article.slides[0].tag,
+          headline:         article.slides[0].headline,
+          tag:              article.slides[0].tag,
           patternName,
-          colorPalette: article.colorPalette,
+          colorPalette:     article.colorPalette,
           productImageBase64,
-          refImageUrl:  ref?.thumbnailUrl,
+          refImageUrl:      ref?.thumbnailUrl,
+          styleDescription: ref?.styleDescription,
         })
         completedSlides++
         updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
@@ -170,15 +171,16 @@ async function processJob(jobId: string, body: ProductInput) {
             const buf = await generateContentSlide({
               productName,
               slideNumber,
-              headline:    slide.headline,
-              tag:         slide.tag,
-              bullets:     slide.bullets,
-              accent:      slide.accent,
-              price:        slide.price,
+              headline:         slide.headline,
+              tag:              slide.tag,
+              bullets:          slide.bullets,
+              accent:           slide.accent,
+              price:            slide.price,
               patternName,
-              colorPalette: article.colorPalette,
+              colorPalette:     article.colorPalette,
               productImageBase64,
-              refImageUrl:  ref?.slideUrlMap[slideNumber],
+              refImageUrl:      ref?.slideUrlMap[slideNumber],
+              styleDescription: ref?.styleDescription,
             })
             completedSlides++
             updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
