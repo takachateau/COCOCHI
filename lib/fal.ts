@@ -10,16 +10,14 @@
 
 import { fal } from "@fal-ai/client"
 import { put } from "@vercel/blob"
-import { pickReferenceImage } from "@/lib/reference"
+import fs from "fs"
+import path from "path"
 
 fal.config({ credentials: process.env.FAL_KEY! })
 
 // ─── 定数 ────────────────────────────────────────────────────────
 
 const NO_UI = "no watermark, no repost icon, no social media UI, no share button, no app interface overlay, no Instagram UI, no TikTok UI, clean image only, no people, no face, no full body, no human figure, close-up of hands holding product or applying to skin is acceptable but no portraits"
-
-// IP-Adapter: スタイル転写モデル（参照画像の色調・雰囲気・質感を忠実に転写）
-const IP_ADAPTER_MODEL = "fal-ai/ip-adapter"
 
 const COLOR_TONES: Record<string, string> = {
   pink:   "soft pink and white feminine pastel",
@@ -32,6 +30,12 @@ const COLOR_TONES: Record<string, string> = {
   mono:   "black and white minimal stylish editorial",
 }
 
+// パターン別参照画像フォルダ
+const REF_DIRS: Record<string, string> = {
+  "手持ちUGC型": "reference/B_手持ちUGC型",
+  "直置きUGC型": "reference/C_直置きUGC型",
+  "記事投稿型":  "reference/D_記事投稿型",
+}
 
 // ─── 同時実行制御 + リトライ ──────────────────────────────────────
 
@@ -53,7 +57,6 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
     try { return await fn() } catch (err) {
       const e = err as { status?: number; message?: string }
       console.error(`[FAL] error (attempt ${i}/${retries}): status=${e.status} message=${e.message}`)
-      // 403 Forbidden は再試行しても意味がないので即throw
       if (e.status === 403) throw err
       if (i === retries) throw err
       await new Promise(r => setTimeout(r, delay * i))
@@ -69,63 +72,42 @@ async function uploadBlob(buf: Buffer, name: string, ct = "image/jpeg"): Promise
   return url
 }
 
-// 同一リクエスト内で商品画像を何度もアップロードしないようキャッシュ
-const _productUrlCache = new Map<string, Promise<string>>()
-
-async function uploadProductOnce(base64: string): Promise<string> {
-  // base64の先頭32文字をキーに（同一画像の判定）
-  const key = base64.slice(0, 32)
-  if (!_productUrlCache.has(key)) {
-    _productUrlCache.set(key, uploadBlob(Buffer.from(base64, "base64"), `product_${Date.now()}.jpg`))
-  }
-  return _productUrlCache.get(key)!
-}
-
-export function clearProductCache() {
-  _productUrlCache.clear()
-}
-
-/**
- * IP-Adapter でスタイル転写生成（セマフォ + リトライ済み）
- *
- * - contentImageUrl: 商品画像（"何を"描くかのコンテンツガイド）
- * - styleImageUrl:   ブランド参照画像（"どんなスタイルで"描くかのスタイルガイド）
- * - scale:           スタイル強度 0.0〜1.0（高いほど参照画像のスタイルに近づく）
- */
-async function generateImageWithIPAdapter(
-  prompt: string,
-  contentImageUrl: string,
-  styleImageUrl: string,
-  scale = 0.65,
-): Promise<Buffer> {
-  await sem.acquire()
+/** パターンのサムネフォルダからランダムに1枚選択 */
+function pickThumbImage(patternName: string): Buffer | null {
+  const dir = REF_DIRS[patternName]
+  if (!dir) return null
+  const thumbDir = path.join(process.cwd(), dir, "サムネ")
   try {
-    return await withRetry(async () => {
-      type FalResult = { images: { url: string }[] }
+    const files = fs.readdirSync(thumbDir).filter(f => /\.(jpg|jpeg|png)$/i.test(f))
+    if (files.length === 0) return null
+    const file = files[Math.floor(Math.random() * files.length)]
+    return fs.readFileSync(path.join(thumbDir, file))
+  } catch {
+    return null
+  }
+}
 
-      console.log(`[IP-Adapter] calling ${IP_ADAPTER_MODEL}, scale=${scale}`)
-      const res = await fal.subscribe(IP_ADAPTER_MODEL, {
-        input: {
-          prompt,
-          image_url: contentImageUrl,
-          ip_adapter_image_url: styleImageUrl,
-          ip_adapter_scale: scale,
-          aspect_ratio: "3:4",
-          output_format: "jpeg",
-        },
-      })
-      const resultData = res.data as FalResult
-
-      const imageUrl = resultData?.images?.[0]?.url
-      if (!imageUrl) throw new Error("IP-Adapter: 画像URLが取得できません")
-      console.log(`[IP-Adapter] 生成完了: ${imageUrl.slice(0, 60)}...`)
-
-      const dl = await fetch(imageUrl)
-      if (!dl.ok) throw new Error(`IP-Adapter: 画像DL失敗 ${dl.status}`)
-      return Buffer.from(await dl.arrayBuffer())
-    })
-  } finally {
-    sem.release()
+/** パターンのpostフォルダからスライド番号に対応する画像を選択 */
+function pickPostImage(patternName: string, slideNumber: number): Buffer | null {
+  const dir = REF_DIRS[patternName]
+  if (!dir) return null
+  const baseDir = path.join(process.cwd(), dir)
+  try {
+    // postフォルダ一覧をランダム順で取得
+    const posts = fs.readdirSync(baseDir).filter(d => d.startsWith("post"))
+    if (posts.length === 0) return null
+    const post = posts[Math.floor(Math.random() * posts.length)]
+    const postDir = path.join(baseDir, post)
+    // slideNumber に対応するファイル（2.jpg, 3.jpg …）
+    const target = `${slideNumber}.jpg`
+    const filePath = path.join(postDir, target)
+    if (fs.existsSync(filePath)) return fs.readFileSync(filePath)
+    // なければ最初の画像を返す
+    const files = fs.readdirSync(postDir).filter(f => /\.(jpg|jpeg|png)$/i.test(f))
+    if (files.length === 0) return null
+    return fs.readFileSync(path.join(postDir, files[0]))
+  } catch {
+    return null
   }
 }
 
@@ -143,7 +125,6 @@ async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffe
         output_format: "jpeg",
       }
 
-      // 画像URLがある場合は /edit エンドポイント（image-to-image）、なければテキストのみ
       const model = imageUrls.length > 0 ? "fal-ai/nano-banana-2/edit" : "fal-ai/nano-banana-2"
       const input = imageUrls.length > 0
         ? { ...baseInput, image_urls: imageUrls }
@@ -174,33 +155,24 @@ export interface UGCCoverParams {
   tag: string
   patternName: string
   colorPalette: string
-  angle?: string         // "感情体験" | "成分・効果" | "ライフスタイル"（参照画像マッチングに使用）
   productImageBase64: string
   instruction?: string
-  useIPAdapter?: boolean
-  ipAdapterScale?: number
 }
 
 /** スライド1（表紙）を FAL FLUX で生成 */
 export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> {
-  const { productName, headline, tag, patternName, colorPalette, productImageBase64, instruction, useIPAdapter, ipAdapterScale } = params
+  const { productName, headline, tag, patternName, colorPalette, productImageBase64, instruction } = params
   const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
 
-  // 商品画像をBlobにアップ（同一画像は1回だけ）
-  const productUrl = await uploadProductOnce(productImageBase64)
+  // 商品画像をBlobにアップ
+  const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
 
-  // reference/ 全体から colorPalette / angle にマッチする参照画像を取得
-  const refBuf = pickReferenceImage({ colorPalette, angle: params.angle ?? "" })
+  // 参照サムネを取得してBlobにアップ
+  const refBuf = pickThumbImage(patternName)
   const refUrl = refBuf ? await uploadBlob(refBuf, `ref_thumb_${Date.now()}.jpg`) : null
-  if (refUrl) console.log(`[FAL] cover ref matched for palette=${colorPalette}`)
 
-  // 記事投稿型のカバーは商品画像を使わない（背景＋タイトルのみ）
   if (patternName === "記事投稿型") {
     const prompt = `Japanese beauty lifestyle Instagram cover, aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible. Large bold Japanese title text: "${headline}", small stylish tag: "${tag}". ${tone} colors, editorial magazine quality. Portrait orientation. ${NO_UI}`
-    if (useIPAdapter && refUrl) {
-      // 記事投稿型: 参照画像のスタイルを背景シーンに転写
-      return generateImageWithIPAdapter(prompt, productUrl, refUrl, ipAdapterScale)
-    }
     return generateImage(prompt, refUrl ? [refUrl] : [])
   }
 
@@ -215,13 +187,8 @@ export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> 
 
   if (instruction) prompt += ` Additional style note: ${instruction}`
 
-  // IP-Adapter: 参照画像のスタイルを商品画像コンテンツに転写
-  if (useIPAdapter && refUrl) {
-    console.log(`[IP-Adapter] cover: ${patternName}, scale=${ipAdapterScale ?? 0.65}`)
-    return generateImageWithIPAdapter(prompt, productUrl, refUrl, ipAdapterScale)
-  }
-
-  return generateImage(prompt, [productUrl, ...(refUrl ? [refUrl] : [])])
+  const imageUrls = [productUrl, ...(refUrl ? [refUrl] : [])]
+  return generateImage(prompt, imageUrls)
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -236,25 +203,21 @@ export interface ContentSlideParams {
   price?: string
   patternName: string
   colorPalette: string
-  angle?: string         // 参照画像マッチングに使用
   productImageBase64: string
   instruction?: string
-  useIPAdapter?: boolean
-  ipAdapterScale?: number
 }
 
 /** スライド2〜5（コンテンツ）を FAL FLUX で生成 */
 export async function generateContentSlide(params: ContentSlideParams): Promise<Buffer> {
-  const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, angle, productImageBase64, instruction, useIPAdapter, ipAdapterScale } = params
+  const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, instruction } = params
   const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
 
-  // 商品画像をBlobにアップ（同一画像は1回だけ）
-  const productUrl = await uploadProductOnce(productImageBase64)
+  // 商品画像をBlobにアップ
+  const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_s${slideNumber}_${Date.now()}.jpg`)
 
-  // reference/ 全体から colorPalette / angle にマッチする参照画像を取得
-  const refBuf = pickReferenceImage({ colorPalette, angle: angle ?? "" })
+  // 参照画像を取得してBlobにアップ
+  const refBuf = pickPostImage(patternName, slideNumber)
   const refUrl = refBuf ? await uploadBlob(refBuf, `ref_post_s${slideNumber}_${Date.now()}.jpg`) : null
-  if (refUrl) console.log(`[FAL] slide ${slideNumber} ref matched for palette=${colorPalette}`)
 
   const bulletText = bullets?.join(" / ") ?? ""
   const accentText = accent ?? ""
@@ -269,11 +232,6 @@ export async function generateContentSlide(params: ContentSlideParams): Promise<
 
   if (instruction) prompt += ` Additional style note: ${instruction}`
 
-  // IP-Adapter: 参照画像のスタイルを商品コンテンツに転写
-  if (useIPAdapter && refUrl) {
-    console.log(`[IP-Adapter] slide ${slideNumber}: ${patternName}, scale=${ipAdapterScale ?? 0.65}`)
-    return generateImageWithIPAdapter(prompt, productUrl, refUrl, ipAdapterScale)
-  }
-
-  return generateImage(prompt, [productUrl, ...(refUrl ? [refUrl] : [])])
+  const imageUrls = [productUrl, ...(refUrl ? [refUrl] : [])]
+  return generateImage(prompt, imageUrls)
 }

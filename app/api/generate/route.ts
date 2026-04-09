@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { generateArticle, qcScore } from "@/lib/claude"
-import { generateUGCCover, generateContentSlide, clearProductCache } from "@/lib/fal"
+import { generateUGCCover, generateContentSlide } from "@/lib/fal"
 import { renderTemplateCover, renderTemplateContentSlide, addSlide2Overlay } from "@/lib/slides"
 import { saveGroup } from "@/lib/storage"
 import { createJob, updateJob, pruneOldJobs } from "@/lib/jobs"
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   pruneOldJobs()
 
-  const job = await createJob()
+  const job = createJob()
   processJob(job.id, body).catch(err => {
     updateJob(job.id, { status: "error", error: String(err) })
   })
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
 // ─── バックグラウンド処理 ──────────────────────────────────────────
 
 async function processJob(jobId: string, body: ProductInput) {
-  const { productName, efficacy, howToUse, price, target, productImageBase64, productImageMime, useIPAdapter, ipAdapterScale } = body
+  const { productName, efficacy, howToUse, price, target, productImageBase64, productImageMime } = body
   const PATTERN_NAMES  = ["商品切り抜き型", "手持ちUGC型", "直置きUGC型", "記事投稿型"]
   const ARTICLE_INDICES = [0, 1, 1, 2]
 
@@ -121,10 +121,7 @@ async function processJob(jobId: string, body: ProductInput) {
           tag: article.slides[0].tag,
           patternName,
           colorPalette: article.colorPalette,
-          angle: article.angle,
           productImageBase64,
-          useIPAdapter,
-          ipAdapterScale,
         })
         completedSlides++
         updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
@@ -142,10 +139,7 @@ async function processJob(jobId: string, body: ProductInput) {
               price: slide.price,
               patternName,
               colorPalette: article.colorPalette,
-              angle: article.angle,
               productImageBase64,
-              useIPAdapter,
-              ipAdapterScale,
             })
             // slide 2（j===0）に商品名＋価格オーバーレイを確実に描画
             if (j === 0) {
@@ -210,6 +204,5 @@ async function processJob(jobId: string, body: ProductInput) {
   }
   const savedGroup = await saveGroup(group)
 
-  clearProductCache()
   updateJob(jobId, { status: "done", progress: "完了", group: savedGroup })
 }
