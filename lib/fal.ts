@@ -145,7 +145,11 @@ export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> 
 
   let prompt: string
   if (patternName === "手持ちUGC型") {
-    prompt = `Authentic Japanese UGC-style Instagram photo. The exact product from the first image, held in hand or applied to skin (close-up hands only, no face).${styleNote} Amateur casual photography feel, genuine user-generated content. ${tone} tones, natural soft lighting. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    // 手持ちUGC型: styleNoteを冒頭に置き、背景・色調・ライティングに絞って指示
+    const handStyleNote = styleDescription
+      ? `Style reference from second image — replicate exactly: background color palette, lighting quality, color grading, overall mood and atmosphere. Do NOT copy the hands or product from the reference.`
+      : ""
+    prompt = `${handStyleNote} Authentic Japanese UGC-style Instagram photo. The exact product from the first image, held in hand or applied to skin (close-up hands only, no face). Amateur casual photography feel, genuine user-generated content, slightly imperfect home setting. ${tone} tones. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else if (patternName === "直置きUGC型") {
     prompt = `Authentic Japanese UGC-style Instagram photo. The exact product from the first image, placed on a surface — desk, shelf, or bathroom counter. No hands.${styleNote} Amateur casual photography feel, genuine user-generated content. ${tone} tones, natural soft lighting. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else {
@@ -190,8 +194,14 @@ export async function generateContentSlide(params: ContentSlideParams): Promise<
   let prompt: string
   if (patternName === "直置きUGC型") {
     prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image, placed on a surface (no hands).${styleNote} Amateur casual photography feel. ${tone} aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+  } else if (patternName === "手持ちUGC型") {
+    // 手持ち: スタイル指示を冒頭に、背景・色調に絞って指定
+    const handStyleNote = styleDescription
+      ? `Style from second image — replicate background color palette, lighting, color grading, mood. Do NOT copy hands or product from reference.`
+      : ""
+    prompt = `${handStyleNote} Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image, held in hand or applied to skin. Amateur casual photography, slightly imperfect home setting. ${tone} aesthetic. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image — held in hand, on a surface, or applied to skin.${styleNote} Amateur casual photography feel. ${tone} aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image in the scene naturally.${styleNote} Amateur casual photography feel. ${tone} aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   }
 
   if (instruction) prompt += ` ${instruction}`
