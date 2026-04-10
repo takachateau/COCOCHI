@@ -77,80 +77,43 @@ async function falFetch(url: string): Promise<Buffer> {
 }
 
 /**
- * テキストのみ生成（参照画像なし）
- * nano-banana-2 を使用（日本語テキスト生成に強い）
+ * 画像生成（1ステップ）
+ * - 画像あり: nano-banana-pro/edit（スタイル踏襲 + 日本語テキスト強化 + 商品反映）
+ * - 画像なし: nano-banana-2（テキストのみ生成）
  */
-async function generateImageTextOnly(prompt: string): Promise<Buffer> {
-  await sem.acquire()
-  try {
-    return await withRetry(async () => {
-      console.log(`[FAL] nano-banana-2 (text only)`)
-      const res = await fal.subscribe("fal-ai/nano-banana-2", {
-        input: { prompt, aspect_ratio: "3:4", resolution: "1K", output_format: "jpeg" },
-      })
-      const url = (res.data as FalResult)?.images?.[0]?.url
-      if (!url) throw new Error("FAL: 画像URLが取得できません")
-      return falFetch(url)
-    })
-  } finally {
-    sem.release()
-  }
-}
-
-/**
- * 2ステップ生成（参照画像あり）
- * Step1: Kontext でスタイル背景を生成（参照画像のスタイルを抽出）
- * Step2: nano-banana-2 で商品+日本語テキストを追加（文字化けなし）
- */
-async function generateImageTwoStep(
-  productUrl: string,
-  refImageUrl: string,
-  step1Prompt: string,
-  step2Prompt: string,
-): Promise<Buffer> {
-  await sem.acquire()
-  try {
-    return await withRetry(async () => {
-      // Step 1: Kontext でスタイルだけ抽出した背景を生成
-      console.log(`[FAL] Step1: Kontext スタイル背景生成...`)
-      const step1Res = await fal.subscribe("fal-ai/flux-pro/kontext", {
-        input: {
-          prompt: step1Prompt,
-          image_url: refImageUrl,
-          output_format: "jpeg" as const,
-        },
-      })
-      const bgUrl = (step1Res.data as FalResult)?.images?.[0]?.url
-      if (!bgUrl) throw new Error("FAL Step1: 背景URL取得失敗")
-      console.log(`[FAL] Step1完了: ${bgUrl.slice(0, 60)}...`)
-
-      // Step 2: nano-banana-2 で商品+日本語テキストを追加
-      console.log(`[FAL] Step2: nano-banana-2 商品+テキスト追加...`)
-      const step2Res = await fal.subscribe("fal-ai/nano-banana-2/edit", {
-        input: {
-          prompt: step2Prompt,
-          image_urls: [bgUrl, productUrl],
-          aspect_ratio: "3:4",
-          resolution: "1K",
-          output_format: "jpeg",
-        },
-      })
-      const finalUrl = (step2Res.data as FalResult)?.images?.[0]?.url
-      if (!finalUrl) throw new Error("FAL Step2: 最終画像URL取得失敗")
-      console.log(`[FAL] Step2完了: ${finalUrl.slice(0, 60)}...`)
-
-      return falFetch(finalUrl)
-    })
-  } finally {
-    sem.release()
-  }
-}
-
-// 後方互換用ラッパー（参照なし → テキストのみ）
 async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffer> {
-  if (imageUrls.length === 0) return generateImageTextOnly(prompt)
-  // imageUrls ありの場合は呼び出し元で generateImageTwoStep を直接使う
-  throw new Error("generateImage: 画像あり生成はgenerateImageTwoStepを使ってください")
+  await sem.acquire()
+  try {
+    return await withRetry(async () => {
+      if (imageUrls.length > 0) {
+        console.log(`[FAL] nano-banana-pro/edit, images: ${imageUrls.length}`)
+        const res = await fal.subscribe("fal-ai/nano-banana-pro/edit", {
+          input: {
+            prompt,
+            image_urls: imageUrls,
+            aspect_ratio: "3:4",
+            resolution: "1K",
+            output_format: "jpeg",
+          },
+        })
+        const url = (res.data as FalResult)?.images?.[0]?.url
+        if (!url) throw new Error("FAL: 画像URLが取得できません")
+        console.log(`[FAL] 生成完了: ${url.slice(0, 60)}...`)
+        return falFetch(url)
+      } else {
+        console.log(`[FAL] nano-banana-2 (text only)`)
+        const res = await fal.subscribe("fal-ai/nano-banana-2", {
+          input: { prompt, aspect_ratio: "3:4", resolution: "1K", output_format: "jpeg" },
+        })
+        const url = (res.data as FalResult)?.images?.[0]?.url
+        if (!url) throw new Error("FAL: 画像URLが取得できません")
+        console.log(`[FAL] 生成完了: ${url.slice(0, 60)}...`)
+        return falFetch(url)
+      }
+    })
+  } finally {
+    sem.release()
+  }
 }
 
 // ─── 公開 API ─────────────────────────────────────────────────────
@@ -167,51 +130,30 @@ export interface UGCCoverParams {
   instruction?: string
 }
 
-/** スライド1（表紙）を 2ステップ生成 */
+/** スライド1（表紙）を nano-banana-pro/edit で生成 */
 export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> {
   const { headline, tag, patternName, colorPalette, productImageBase64, refImageUrl, styleDescription, instruction } = params
-  const tone = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
+  const tone      = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
+  const styleNote = styleDescription ? ` Replicate this exact visual style: ${styleDescription}.` : ""
 
-  // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
 
-  // 参照画像なし → テキストのみ生成（nano-banana-2）
-  if (!refImageUrl) {
-    let prompt: string
-    if (patternName === "記事投稿型") {
-      prompt = `Japanese beauty lifestyle Instagram cover, aesthetic background scene. ${tone} colors. Large bold Japanese title: "${headline}", tag: "${tag}". Portrait orientation. ${NO_UI}`
-    } else if (patternName === "手持ちUGC型") {
-      prompt = `Japanese UGC-style Instagram cover, skincare product held in hand. ${tone} tones. Large bold Japanese text: "${headline}", tag: "${tag}". Portrait orientation. ${NO_UI}`
-    } else {
-      prompt = `Japanese UGC-style Instagram cover, skincare product on surface. ${tone} tones. Large bold Japanese text: "${headline}", tag: "${tag}". Portrait orientation. ${NO_UI}`
-    }
-    return generateImageTextOnly(prompt)
+  if (patternName === "記事投稿型") {
+    const prompt = `Japanese beauty lifestyle Instagram cover. Aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible.${styleNote} Large bold Japanese title: "${headline}", small tag: "${tag}". ${tone} colors. Portrait orientation. ${NO_UI}`
+    return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
   }
 
-  // Step1: Kontext でスタイル背景を生成
-  const styleHint = styleDescription ? ` Target style: ${styleDescription}.` : ""
-  let step1Prompt: string
-  if (patternName === "記事投稿型") {
-    step1Prompt = `Remove all products, text, and people from this image. Keep the background scene, color palette, lighting, and decorative elements exactly as-is. Output a clean empty background ready for text placement.${styleHint}`
-  } else {
-    step1Prompt = `Remove all products, text, and people from this image. Keep the background, surface, color palette, lighting, and props exactly as-is. Output a clean empty scene ready for product placement.${styleHint}`
-  }
-
-  // Step2: nano-banana-2 で商品+テキストを追加
-  let step2Prompt: string
-  if (patternName === "記事投稿型") {
-    step2Prompt = `Using this background, create a Japanese beauty lifestyle Instagram cover. Add large bold Japanese title text: "${headline}" and small tag: "${tag}". ${tone} colors, editorial quality. Portrait orientation. ${NO_UI}`
-  } else if (patternName === "手持ちUGC型") {
-    step2Prompt = `Place the exact product shown in the second image into this background, held in hand or applied to skin (close-up hands only). ${tone} tones, natural soft lighting. Add large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+  let prompt: string
+  if (patternName === "手持ちUGC型") {
+    prompt = `Authentic Japanese UGC-style Instagram photo. The exact product from the first image, held in hand or applied to skin (close-up hands only, no face).${styleNote} Amateur casual photography feel, genuine user-generated content. ${tone} tones, natural soft lighting. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else if (patternName === "直置きUGC型") {
-    step2Prompt = `Place the exact product shown in the second image into this background, resting on the surface — no hands. ${tone} tones, natural soft lighting. Add large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram photo. The exact product from the first image, placed on a surface — desk, shelf, or bathroom counter. No hands.${styleNote} Amateur casual photography feel, genuine user-generated content. ${tone} tones, natural soft lighting. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   } else {
-    step2Prompt = `Place the exact product shown in the second image naturally into this background scene. ${tone} colors, soft natural lighting. Add large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Japanese beauty Instagram photo. The exact product from the first image in the scene naturally.${styleNote} ${tone} colors, soft natural lighting. Large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
   }
 
-  if (instruction) step2Prompt += ` ${instruction}`
-
-  return generateImageTwoStep(productUrl, refImageUrl, step1Prompt, step2Prompt)
+  if (instruction) prompt += ` ${instruction}`
+  return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -232,38 +174,26 @@ export interface ContentSlideParams {
   instruction?: string
 }
 
-/** スライド2〜5（コンテンツ）を 2ステップ生成 */
+/** スライド2〜5（コンテンツ）を nano-banana-pro/edit で生成 */
 export async function generateContentSlide(params: ContentSlideParams): Promise<Buffer> {
   const { productName, slideNumber, headline, tag, bullets, accent, price, patternName, colorPalette, productImageBase64, refImageUrl, styleDescription, instruction } = params
   const tone       = COLOR_TONES[colorPalette] ?? "soft pastel aesthetic"
   const bulletText = bullets?.join(" / ") ?? ""
   const accentText = accent ?? ""
+  const styleNote  = styleDescription ? ` Replicate this exact visual style: ${styleDescription}.` : ""
   const slide2Text = slideNumber === 2
-    ? ` Include product name "${productName}"${price ? ` and price "${price}"` : ""} as bold Japanese text.`
+    ? ` Prominently include product name "${productName}"${price ? ` and price "${price}"` : ""} as bold Japanese text.`
     : ""
 
-  // 商品画像をBlobにアップ
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_s${slideNumber}_${Date.now()}.jpg`)
 
-  // 参照画像なし → nano-banana-2 テキストのみ
-  if (!refImageUrl) {
-    const prompt = `Japanese UGC-style Instagram carousel slide. ${tone} aesthetic. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullets: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
-    return generateImageTextOnly(prompt)
-  }
-
-  // Step1: Kontext でスタイル背景を生成
-  const styleHint = styleDescription ? ` Target style: ${styleDescription}.` : ""
-  const step1Prompt = `Remove all products, text, and people from this image. Keep the background, surface, color palette, lighting, and layout structure exactly as-is. Output a clean empty background.${styleHint}`
-
-  // Step2: nano-banana-2 で商品+テキストを追加
-  let step2Prompt: string
+  let prompt: string
   if (patternName === "直置きUGC型") {
-    step2Prompt = `Place the exact product shown in the second image into this background, resting on the surface (no hands). ${tone} aesthetic, natural soft lighting. Add large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image, placed on a surface (no hands).${styleNote} Amateur casual photography feel. ${tone} aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   } else {
-    step2Prompt = `Place the exact product shown in the second image into this background — held in hand, on a surface, or applied to skin. ${tone} aesthetic, beauty lifestyle photography. Add large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image — held in hand, on a surface, or applied to skin.${styleNote} Amateur casual photography feel. ${tone} aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   }
 
-  if (instruction) step2Prompt += ` ${instruction}`
-
-  return generateImageTwoStep(productUrl, refImageUrl, step1Prompt, step2Prompt)
+  if (instruction) prompt += ` ${instruction}`
+  return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
 }
