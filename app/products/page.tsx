@@ -375,7 +375,7 @@ export default function ProductsPage() {
   return (
     <div className="min-h-screen" style={{ background: "var(--bg)" }}>
       <header style={{ background: "var(--card)", borderBottom: "1px solid var(--border)" }}>
-        <div className="max-w-screen-2xl mx-auto px-6 h-14 flex items-center gap-3">
+        <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 h-14 flex items-center gap-3">
           <Link
             href="/"
             className="flex items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
@@ -397,9 +397,9 @@ export default function ProductsPage() {
         </div>
       </header>
 
-      <main className="max-w-screen-2xl mx-auto px-6 py-8 flex gap-8">
+      <main className="max-w-screen-2xl mx-auto px-3 sm:px-6 py-6 sm:py-8 flex flex-col lg:flex-row gap-6 lg:gap-8">
         {/* ── 登録フォーム ── */}
-        <div className="flex-shrink-0 w-80 space-y-4">
+        <div className="w-full lg:flex-shrink-0 lg:w-80 space-y-4">
           <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>新規商品を登録</h2>
 
           {/* 商品画像 */}

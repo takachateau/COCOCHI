@@ -215,7 +215,7 @@ function SlideModal({
         </div>
 
         {/* 5枚グリッド（クリックでその場プレビュー、↻で1枚再生成） */}
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
           {post.images.map((img, i) => {
             const isRegening = regenIdx === i
             return (
@@ -438,8 +438,8 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
         style={{ borderColor: "var(--border)", background: index % 2 === 0 ? "var(--card)" : "var(--bg)" }}
       >
         {/* 上段: No. / 商品名+日時 / ボタン群 */}
-        <div className="flex items-center gap-3 px-5 pt-3 pb-2">
-          <span className="text-sm font-bold w-6 flex-shrink-0 text-right" style={{ color: "var(--muted)" }}>{index + 1}</span>
+        <div className="flex items-center gap-2 px-3 sm:px-5 pt-3 pb-2">
+          <span className="text-sm font-bold w-5 flex-shrink-0 text-right" style={{ color: "var(--muted)" }}>{index + 1}</span>
           <div className="flex-1 min-w-0">
             <p className="font-bold text-sm truncate" style={{ color: "var(--text)" }}>{group.productName}</p>
             <p className="text-xs" style={{ color: "var(--muted)" }}>{date}</p>
@@ -451,16 +451,16 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
           <button
             onClick={handleBulkRegen}
             disabled={bulkRegen || !!regenKey}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-70 whitespace-nowrap disabled:opacity-40 flex-shrink-0"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-70 whitespace-nowrap disabled:opacity-40 flex-shrink-0"
             style={{ color: "var(--accent)", background: "var(--accent-light)", border: "1px solid var(--accent)" }}
           >
             <RefreshCw className={`w-3 h-3 ${bulkRegen ? "animate-spin" : ""}`} />
-            一括再生成
+            <span className="hidden sm:inline">一括再生成</span>
           </button>
           {/* 詳細 */}
           <button
             onClick={() => setExpanded(v => !v)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-70 whitespace-nowrap flex-shrink-0"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-70 whitespace-nowrap flex-shrink-0"
             style={{ color: "var(--accent)", background: "var(--accent-light)" }}
           >
             {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -477,7 +477,7 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
         </div>
 
         {/* 下段: 4パターンのサムネ */}
-        <div className="flex gap-3 px-5 pb-3" style={{ overflowX: "auto" }}>
+        <div className="flex gap-3 px-3 sm:px-5 pb-3" style={{ overflowX: "auto" }}>
           {group.posts.map(post => (
             <button
               key={post.id}
@@ -502,7 +502,7 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
 
         {/* 展開パネル: 全スライド一覧 */}
         {expanded && (
-          <div className="px-5 pb-5 space-y-5 border-t" style={{ borderColor: "var(--border)", background: "var(--bg)" }}>
+          <div className="px-3 sm:px-5 pb-5 space-y-5 border-t" style={{ borderColor: "var(--border)", background: "var(--bg)" }}>
             {/* 追加指示文 */}
             <div className="pt-4 flex items-center gap-3">
               <div className="flex-1">
@@ -621,35 +621,35 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen" style={{ background: "var(--bg)" }}>
       <header style={{ background: "var(--card)", borderBottom: "1px solid var(--border)" }}>
-        <div className="max-w-screen-2xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "var(--accent)" }}>
+        <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: "var(--accent)" }}>
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <span className="font-bold text-base" style={{ color: "var(--text)" }}>COCOCHI</span>
-            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent-light)", color: "var(--accent)" }}>
+            <span className="hidden sm:inline text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent-light)", color: "var(--accent)" }}>
               投稿管理ツール
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs" style={{ color: "var(--muted)" }}>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="hidden sm:inline text-xs" style={{ color: "var(--muted)" }}>
               {groups.length} 商品 / {groups.reduce((sum, g) => sum + g.posts.length, 0)} 投稿
             </span>
             <Link
               href="/products"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold transition-opacity hover:opacity-80"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-bold transition-opacity hover:opacity-80"
               style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}
             >
               <Package className="w-4 h-4" />
-              商品管理
+              <span className="hidden sm:inline">商品管理</span>
             </Link>
             <Link
               href="/generate"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white transition-opacity hover:opacity-85"
+              className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-sm font-bold text-white transition-opacity hover:opacity-85"
               style={{ background: "var(--accent)" }}
             >
               <Plus className="w-4 h-4" />
-              新規生成
+              <span className="hidden sm:inline">新規生成</span>
             </Link>
           </div>
         </div>
