@@ -1,14 +1,31 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Upload, Sparkles, ArrowLeft, Download, Save, Package, ChevronRight, X } from "lucide-react"
+import { Upload, Sparkles, ArrowLeft, Download, Save, Package, ChevronRight, X, Shuffle } from "lucide-react"
 import { usePosts } from "@/context/posts"
 import { useProducts } from "@/context/products"
 import type { PostGroup, ProductInput, Product } from "@/types"
 
+// パターン定義（route.ts の PATTERN_NAMES / PATTERN_ANGLE_POOLS と必ず一致させること）
+const ORDERED_PATTERNS = ["エンタメ導入型", "手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
+
+const PATTERN_ANGLE_POOLS: Record<string, string[]> = {
+  "エンタメ導入型": ["感情体験", "共感・あるある", "ギャップ体験", "衝撃告白"],
+  "手持ちUGC型":   ["ビフォーアフター", "継続結果レポ", "正直レビュー", "周りの反応"],
+  "直置きUGC型":   ["ルーティン紹介", "時短・ズボラ", "シーン訴求", "映え・世界観"],
+  "記事投稿型":    ["成分・効果", "皮膚科目線", "他社比較", "ハウツー解説"],
+}
+
+function randomAngles(): string[] {
+  return ORDERED_PATTERNS.map(p => {
+    const pool = PATTERN_ANGLE_POOLS[p]
+    return pool[Math.floor(Math.random() * pool.length)]
+  })
+}
+
 const PATTERN_ICONS: Record<string, string> = {
-  "商品切り抜き型": "🎨",
+  "エンタメ導入型": "🎬",
   "手持ちUGC型":   "🤳",
   "直置きUGC型":   "🛋️",
   "記事投稿型":    "📰",
@@ -130,7 +147,7 @@ export default function GeneratePage() {
 
   // 手動入力モード
   const [productName, setProductName]   = useState("")
-  const [efficacy, setEfficacy]         = useState("")
+  const [ingredients, setIngredients]   = useState("")
   const [howToUse, setHowToUse]         = useState("")
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [imageBase64, setImageBase64]   = useState("")
@@ -138,16 +155,34 @@ export default function GeneratePage() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   // アピール設定（両モード共通）
-  const [ageGroup, setAgeGroup]         = useState("")
-  const [skinType, setSkinType]         = useState("")
-  const [appealDir, setAppealDir]       = useState("")
+  const [target, setTarget]             = useState("")
+  const [appealAngles, setAppealAngles] = useState<string[]>(() => randomAngles())
 
   // 生成状態
   const [loading, setLoading]   = useState(false)
   const [progress, setProgress] = useState("")
+  const [completedSlides, setCompletedSlides] = useState(0)
+  const [totalSlides, setTotalSlides]         = useState(20)
+  const [startTime, setStartTime]             = useState<number | null>(null)
+  const [elapsed, setElapsed]                 = useState(0)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [group, setGroup]       = useState<PostGroup | null>(null)
   const [previewImg, setPreviewImg] = useState<string | null>(null)
+  const [copiedPostId, setCopiedPostId] = useState<string | null>(null)
+
+  // 経過時間タイマー
+  useEffect(() => {
+    if (loading && startTime) {
+      elapsedTimerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startTime) / 1000))
+      }, 1000)
+    } else {
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+      if (!loading) setElapsed(0)
+    }
+    return () => { if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current) }
+  }, [loading, startTime])
 
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -177,25 +212,17 @@ export default function GeneratePage() {
     }
   }
 
-  function buildTarget(): string {
-    return [
-      ageGroup    && `年齢層: ${ageGroup}`,
-      skinType    && `肌質: ${skinType}`,
-      appealDir   && `アピール方向性: ${appealDir}`,
-    ].filter(Boolean).join("、")
-  }
-
   async function handleGenerate() {
     const name  = mode === "registered" ? selectedProduct?.name ?? "" : productName
-    const eff   = mode === "registered" ? selectedProduct?.efficacy ?? "" : efficacy
+    const ing   = mode === "registered" ? (selectedProduct?.ingredients ?? selectedProduct?.efficacy ?? "") : ingredients
     const how   = mode === "registered" ? selectedProduct?.howToUse ?? "" : howToUse
 
     if (mode === "registered" && !selectedProduct) {
       setError("商品を選択してください")
       return
     }
-    if (mode === "manual" && (!name || !eff || !how || !imageBase64)) {
-      setError("商品名・効能・使い方・商品画像はすべて必須です")
+    if (mode === "manual" && (!name || !ing || !how || !imageBase64)) {
+      setError("商品名・成分・使い方・商品画像はすべて必須です")
       return
     }
     if (loadingProduct) return
@@ -204,14 +231,22 @@ export default function GeneratePage() {
     setError(null)
     setGroup(null)
     setProgress("生成を開始しています...")
+    setCompletedSlides(0)
+    setTotalSlides(20)
+    setStartTime(null)
+    setElapsed(0)
 
     try {
       const body: ProductInput = {
         productName: name,
-        efficacy: eff,
+        ingredients: ing,
         howToUse: how,
         price: mode === "registered" ? (selectedProduct?.price ?? undefined) : undefined,
-        target: buildTarget() || undefined,
+        appealPoints: mode === "registered" ? (selectedProduct?.appealPoints ?? undefined) : undefined,
+        forbiddenWords: mode === "registered" ? (selectedProduct?.forbiddenWords ?? undefined) : undefined,
+        pdfText: mode === "registered" ? (selectedProduct?.pdfText ?? undefined) : undefined,
+        target: target || undefined,
+        appealAngles: appealAngles.every(a => a.trim()) ? appealAngles : undefined,
         productImageBase64: imageBase64,
         productImageMime: imageMime,
       }
@@ -231,12 +266,17 @@ export default function GeneratePage() {
             const r = await fetch(`/api/generate/status/${jobId}`)
             const d = await r.json() as {
               status: string
+              progress: string
               completedSlides: number
               totalSlides: number
+              startTime?: number
               group?: PostGroup
               error?: string
             }
-            setProgress(`${d.completedSlides}/${d.totalSlides}枚 生成中...`)
+            setProgress(d.progress ?? "")
+            setCompletedSlides(d.completedSlides)
+            setTotalSlides(d.totalSlides)
+            if (d.startTime) setStartTime(d.startTime)
             if (d.status === "done") { clearInterval(poll); setGroup(d.group!); resolve() }
             else if (d.status === "error") { clearInterval(poll); reject(new Error(d.error ?? "生成エラー")) }
           } catch { /* 一時失敗は無視 */ }
@@ -411,7 +451,7 @@ export default function GeneratePage() {
 
                 {[
                   { label: "商品名", value: productName, set: setProductName, ph: "例: 22:00 アネトス クレンジングウォーター", rows: 1, req: true },
-                  { label: "効能・特徴", value: efficacy, set: setEfficacy, ph: "例: サリチル酸配合で毛穴の黒ずみをケア...", rows: 3, req: true },
+                  { label: "成分表とその効能", value: ingredients, set: setIngredients, ph: "例: サリチル酸（BHA）で毛穴ケア、セラミドNPで肌バリア補強...", rows: 4, req: true },
                   { label: "使い方", value: howToUse, set: setHowToUse, ph: "例: コットンに染み込ませて拭き取る", rows: 2, req: true },
                 ].map(f => (
                   <div key={f.label}>
@@ -450,28 +490,95 @@ export default function GeneratePage() {
               <p className="text-xs font-bold" style={{ color: "var(--text)" }}>
                 アピール設定 <span className="font-normal" style={{ color: "var(--muted)" }}>（任意）</span>
               </p>
-              {[
-                { label: "年齢層", value: ageGroup, set: setAgeGroup, ph: "例: 20〜30代" },
-                { label: "肌質", value: skinType, set: setSkinType, ph: "例: 脂性肌・毛穴が気になる" },
-                { label: "アピール方向性", value: appealDir, set: setAppealDir, ph: "例: 成分重視、ナチュラル志向" },
-              ].map(f => (
-                <div key={f.label}>
-                  <label className="block text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>{f.label}</label>
-                  <input
-                    type="text"
-                    value={f.value}
-                    onChange={e => f.set(e.target.value)}
-                    placeholder={f.ph}
-                    className="w-full px-3 py-2 rounded-lg border text-xs outline-none"
-                    style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                  />
+
+              {/* ターゲット */}
+              <div>
+                <label className="block text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>ターゲット層</label>
+                <input
+                  type="text"
+                  value={target}
+                  onChange={e => setTarget(e.target.value)}
+                  placeholder="例: 20〜30代・脂性肌・毛穴が気になる"
+                  className="w-full px-3 py-2 rounded-lg border text-xs outline-none"
+                  style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                />
+              </div>
+
+              {/* パターン別訴求方向性 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>
+                    パターン別の訴求方向性
+                  </label>
+                  <button
+                    onClick={() => setAppealAngles(randomAngles())}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
+                    style={{ background: "var(--accent-light)", color: "var(--accent)" }}
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    シャッフル
+                  </button>
                 </div>
-              ))}
+                <div className="space-y-1.5">
+                  {ORDERED_PATTERNS.map((pattern, i) => (
+                    <div key={pattern} className="flex items-center gap-2">
+                      <span
+                        className="text-xs font-bold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap"
+                        style={{ background: "var(--accent-light)", color: "var(--accent)", fontSize: "10px" }}
+                      >
+                        {PATTERN_ICONS[pattern]} {pattern}
+                      </span>
+                      <input
+                        type="text"
+                        value={appealAngles[i] ?? ""}
+                        onChange={e => {
+                          const next = [...appealAngles]
+                          next[i] = e.target.value
+                          setAppealAngles(next)
+                        }}
+                        placeholder={PATTERN_ANGLE_POOLS[pattern][0]}
+                        className="flex-1 px-2.5 py-1.5 rounded-lg border text-xs outline-none"
+                        style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs mt-1.5" style={{ color: "var(--muted)" }}>
+                  空欄のスロットは自動でランダム選択されます
+                </p>
+              </div>
             </div>
 
             {error && (
               <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200">
                 <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+
+            {/* プログレスバー（生成中のみ表示） */}
+            {loading && (
+              <div
+                className="rounded-xl p-4 space-y-2"
+                style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold" style={{ color: "var(--text)" }}>{progress}</p>
+                  <p className="text-xs font-mono tabular-nums" style={{ color: "var(--muted)" }}>
+                    {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+                  </p>
+                </div>
+                <div className="w-full rounded-full overflow-hidden" style={{ height: 6, background: "var(--border)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${totalSlides > 0 ? Math.round((completedSlides / totalSlides) * 100) : 0}%`,
+                      background: "var(--accent)",
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-center" style={{ color: "var(--muted)" }}>
+                  {completedSlides} / {totalSlides} 枚完了
+                </p>
               </div>
             )}
 
@@ -481,15 +588,15 @@ export default function GeneratePage() {
               className="w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white transition-opacity disabled:opacity-60"
               style={{ background: "var(--accent)" }}
             >
-              {loading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  {progress}
-                </>
-              ) : loadingProduct ? (
+              {loadingProduct ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   画像を読み込み中...
+                </>
+              ) : loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  生成中...
                 </>
               ) : (
                 <>
@@ -594,6 +701,35 @@ export default function GeneratePage() {
                         </div>
                       </div>
                     </div>
+
+                    {/* キャプション */}
+                    {post.caption && (
+                      <div
+                        className="rounded-xl p-4"
+                        style={{ background: "var(--bg)", border: "1px solid var(--border)" }}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-bold" style={{ color: "var(--text)" }}>キャプション</p>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(post.caption!)
+                              setCopiedPostId(post.id)
+                              setTimeout(() => setCopiedPostId(null), 2000)
+                            }}
+                            className="text-xs px-2.5 py-1 rounded-lg font-bold transition-colors"
+                            style={{
+                              background: copiedPostId === post.id ? "var(--accent)" : "var(--accent-light)",
+                              color: copiedPostId === post.id ? "white" : "var(--accent)",
+                            }}
+                          >
+                            {copiedPostId === post.id ? "コピーしました ✓" : "コピー"}
+                          </button>
+                        </div>
+                        <p className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: "var(--muted)" }}>
+                          {post.caption}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

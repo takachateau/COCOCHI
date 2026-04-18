@@ -1,31 +1,32 @@
 {
   "posts": {
-    "B_手持ちUGC型/post1": {
-      "mood": "pop"
-    },
-    "B_手持ちUGC型/post2": {
-      "mood": "pop"
-    },
-    "B_手持ちUGC型/post3": {
-      "mood": "pop"
-    },
-    "B_手持ちUGC型/post4": {
-      "mood": "pop"
-    },
-    "C_直置きUGC型/post1": {
-      "mood": "pop"
-    },
-    "C_直置きUGC型/post2": {
-      "mood": "pop"
-    },
-    "C_直置きUGC型/post3": {
-      "mood": "pop"
-    },
-    "D_記事投稿型/post1": {
-      "mood": "pop"
-    },
-    "D_記事投稿型/post2": {
-      "mood": "natural"
-    }
+    "B_手持ちUGC型/post1": { "mood": "pop" },
+    "B_手持ちUGC型/post2": { "mood": "pop" },
+    "B_手持ちUGC型/post3": { "mood": "pop" },
+    "B_手持ちUGC型/post4": { "mood": "pop" },
+    "C_直置きUGC型/post1": { "mood": "pop" },
+    "C_直置きUGC型/post2": { "mood": "pop" },
+    "C_直置きUGC型/post3": { "mood": "pop" },
+    "D_記事投稿型/post1":  { "mood": "pop" },
+    "D_記事投稿型/post2":  { "mood": "natural" },
+    "E_エンタメ導入型/s1":  { "mood": "natural", "hookCategory": "恋愛・感情体験",      "hookStructure": "感情ストーリー型",   "screenshotFile": "スクリーンショット 2026-04-16 18.35.27.png" },
+    "E_エンタメ導入型/s2":  { "mood": "natural", "hookCategory": "ダイエット・ボディ変化","hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.35.32.png" },
+    "E_エンタメ導入型/s3":  { "mood": "cool",    "hookCategory": "恋愛・炎上議論",      "hookStructure": "炎上・問答型",       "screenshotFile": "スクリーンショット 2026-04-16 18.35.37.png" },
+    "E_エンタメ導入型/s4":  { "mood": "cool",    "hookCategory": "メイク・美容ハウツー", "hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.35.47.png" },
+    "E_エンタメ導入型/s5":  { "mood": "natural", "hookCategory": "ダイエット・ボディ変化","hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.47.51.png" },
+    "E_エンタメ導入型/s6":  { "mood": "natural", "hookCategory": "肌トラブル・悩み解決", "hookStructure": "悩み解決型",         "screenshotFile": "スクリーンショット 2026-04-16 18.47.56.png" },
+    "E_エンタメ導入型/s7":  { "mood": "cool",    "hookCategory": "恋愛・炎上議論",      "hookStructure": "炎上・問答型",       "screenshotFile": "スクリーンショット 2026-04-16 18.48.00.png" },
+    "E_エンタメ導入型/s8":  { "mood": "natural", "hookCategory": "肌トラブル・悩み解決", "hookStructure": "悩み解決型",         "screenshotFile": "スクリーンショット 2026-04-16 18.48.07.png" },
+    "E_エンタメ導入型/s9":  { "mood": "mono",    "hookCategory": "節約・お金",          "hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.48.12.png" },
+    "E_エンタメ導入型/s10": { "mood": "natural", "hookCategory": "肌トラブル・悩み解決", "hookStructure": "悩み解決型",         "screenshotFile": "スクリーンショット 2026-04-16 18.48.19.png" },
+    "E_エンタメ導入型/s11": { "mood": "pop",     "hookCategory": "メイク・美容ハウツー", "hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.48.24.png" },
+    "E_エンタメ導入型/s12": { "mood": "luxury",  "hookCategory": "ファッション・コーデ", "hookStructure": "感情ストーリー型",   "screenshotFile": "スクリーンショット 2026-04-16 18.48.29.png" },
+    "E_エンタメ導入型/s13": { "mood": "cool",    "hookCategory": "モテ・自己磨き",      "hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.48.32.png" },
+    "E_エンタメ導入型/s14": { "mood": "cool",    "hookCategory": "メイク・美容ハウツー", "hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.48.38.png" },
+    "E_エンタメ導入型/s15": { "mood": "natural", "hookCategory": "ダイエット・ボディ変化","hookStructure": "記録・チャレンジ型", "screenshotFile": "スクリーンショット 2026-04-16 18.48.48.png" },
+    "E_エンタメ導入型/s16": { "mood": "natural", "hookCategory": "ダイエット・ボディ変化","hookStructure": "感情ストーリー型",   "screenshotFile": "スクリーンショット 2026-04-16 18.48.52.png" },
+    "E_エンタメ導入型/s17": { "mood": "natural", "hookCategory": "モテ・自己磨き",      "hookStructure": "感情ストーリー型",   "screenshotFile": "スクリーンショット 2026-04-16 18.48.56.png" },
+    "E_エンタメ導入型/s18": { "mood": "natural", "hookCategory": "モテ・自己磨き",      "hookStructure": "感情ストーリー型",   "screenshotFile": "スクリーンショット 2026-04-16 18.49.01.png" },
+    "E_エンタメ導入型/s19": { "mood": "natural", "hookCategory": "暮らし・生活Tips",    "hookStructure": "ハウツー連番型",     "screenshotFile": "スクリーンショット 2026-04-16 18.49.05.png" }
   }
 }

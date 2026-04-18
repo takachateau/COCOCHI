@@ -19,6 +19,7 @@ export async function GET(
     progress:        job.progress,
     completedSlides: job.completedSlides,
     totalSlides:     job.totalSlides,
+    startTime:       job.startTime,
     group:           job.group,
     error:           job.error,
   })

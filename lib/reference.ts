@@ -16,16 +16,23 @@ import path from "path"
 const REF_DIR = path.join(process.cwd(), "reference")
 
 const PATTERN_DIR: Record<string, string> = {
-  "手持ちUGC型": "B_手持ちUGC型",
-  "直置きUGC型": "C_直置きUGC型",
-  "記事投稿型":  "D_記事投稿型",
+  "手持ちUGC型":   "B_手持ちUGC型",
+  "直置きUGC型":   "C_直置きUGC型",
+  "記事投稿型":    "D_記事投稿型",
+  "エンタメ導入型": "E_エンタメ導入型",
 }
 
-const MOODS = ["natural", "luxury", "pop", "cool"] as const
+const MOODS = ["natural", "luxury", "pop", "cool", "mono"] as const
 export type Mood = typeof MOODS[number]
 
+interface MetaEntry {
+  mood: string
+  hookCategory?: string
+  hookStructure?: string
+  screenshotFile?: string
+}
 interface Metadata {
-  posts: Record<string, { mood: string }>
+  posts: Record<string, MetaEntry>
 }
 
 // metadata.jsonはリクエストごとに読み直す（タグ追加に即対応）
@@ -173,7 +180,13 @@ ${exampleJson}`,
     })
 
     const block0 = res.content[0]
-    const parsed = JSON.parse(block0.type === "text" ? block0.text.trim() : "{}")
+    const rawText = block0.type === "text" ? block0.text.trim() : "{}"
+    // Claudeがmarkdownコードブロックで返してくることがあるので除去
+    const jsonText = rawText
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim()
+    const parsed = JSON.parse(jsonText)
     for (const [k, v] of Object.entries(parsed)) {
       const filePath = path.join(folderPath, v as string)
       if (fs.existsSync(filePath)) slideMap[Number(k)] = filePath
@@ -282,4 +295,59 @@ export async function uploadRefMapping(
   )
 
   return { thumbnailUrl, slideUrlMap, styleDescription }
+}
+
+// ─── 6. エンタメ導入型専用スタイル選択 ───────────────────────────
+
+/**
+ * エンタメ導入型専用: metadata.jsonのE_エントリからmoodに合うスクリーンショットを選び
+ * スタイル説明 + BlobURLを返す
+ */
+export async function selectEntertainmentStyle(mood: Mood): Promise<UploadedRefMapping | null> {
+  const meta    = loadMetadata()
+  const dirKey  = "E_エンタメ導入型"
+  const eDir    = path.join(REF_DIR, dirKey)
+
+  const all = Object.entries(meta.posts).filter(([k]) => k.startsWith(dirKey))
+  if (all.length === 0) return null
+
+  const matched = all.filter(([, v]) => v.mood === mood)
+  const pool    = matched.length > 0 ? matched : all
+  const [key, entry] = pool[Math.floor(Math.random() * pool.length)]
+
+  const screenshotFile = entry.screenshotFile ?? key.split("/")[1]
+  const filePath = path.join(eDir, screenshotFile)
+  if (!fs.existsSync(filePath)) return null
+
+  console.log(`[reference] エンタメ導入型 style ref: ${screenshotFile} (${entry.hookCategory ?? "?"}/${entry.hookStructure ?? "?"})`)
+
+  const buf = fs.readFileSync(filePath)
+  const ts  = Date.now()
+
+  const [{ url: thumbnailUrl }, styleDescription] = await Promise.all([
+    put(`cocochi/ref/e_thumb_${ts}.jpg`, buf, { access: "public", contentType: "image/jpeg", addRandomSuffix: true }),
+    describeRefStyle(filePath),
+  ])
+
+  return {
+    thumbnailUrl,
+    slideUrlMap: {},   // エンタメ導入型は個別スライドマッピング不使用
+    styleDescription,
+  }
+}
+
+// ─── 7. キャプション読み込み ──────────────────────────────────────
+
+/**
+ * postフォルダ内の caption.txt を読み込んで返す
+ * ファイルが存在しない場合は null を返す
+ */
+export function readCaption(postFolderKey: string): string | null {
+  const captionPath = path.join(REF_DIR, postFolderKey, "caption.txt")
+  try {
+    if (fs.existsSync(captionPath)) {
+      return fs.readFileSync(captionPath, "utf8").trim()
+    }
+  } catch { /* ignore */ }
+  return null
 }

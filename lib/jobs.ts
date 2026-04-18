@@ -11,6 +11,7 @@ export interface Job {
   group?: PostGroup
   error?: string
   createdAt: number
+  startTime?: number   // generating 状態に入った時刻 (ms)
 }
 
 const g = globalThis as typeof globalThis & { __cocochi_jobs?: Map<string, Job> }

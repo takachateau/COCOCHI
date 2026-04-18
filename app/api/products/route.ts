@@ -8,10 +8,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, efficacy, howToUse, price, imageBase64, imageMime } = await req.json()
-  if (!name || !efficacy || !howToUse || !imageBase64) {
+  const { name, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, imageBase64, imageMime } = await req.json()
+  if (!name || !ingredients || !howToUse || !imageBase64) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 })
   }
-  const product = await createProduct({ name, efficacy, howToUse, price, imageBase64, imageMime: imageMime || "image/jpeg" })
+  const product = await createProduct({
+    name, ingredients, howToUse, price,
+    appealPoints, forbiddenWords, pdfText,
+    imageBase64, imageMime: imageMime || "image/jpeg",
+  })
   return NextResponse.json(product)
 }
