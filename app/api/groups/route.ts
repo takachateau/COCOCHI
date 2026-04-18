@@ -3,7 +3,7 @@ import { loadGroups } from "@/lib/storage"
 
 export const runtime = "nodejs"
 
-export function GET() {
-  const groups = loadGroups()
+export async function GET() {
+  const groups = await loadGroups()
   return NextResponse.json(groups)
 }

@@ -1,26 +1,45 @@
-import { put, del } from "@vercel/blob"
-import fs from "fs"
-import path from "path"
+/**
+ * 商品ストレージ
+ * - 画像: Vercel Blob（公開URL）
+ * - メタデータ: Vercel Blob（products.json）— ファイルシステム非依存
+ */
+import { put, list, del } from "@vercel/blob"
 import type { Product } from "@/types"
 
-const DATA_DIR      = path.join(process.cwd(), "data")
-const PRODUCTS_FILE = path.join(DATA_DIR, "products.json")
+const PRODUCTS_BLOB_PATH = "cocochi/db/products.json"
 
-function ensureDirs() {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
-}
+// ─── 内部ユーティリティ ───────────────────────────────────────────
 
-export function loadProducts(): Product[] {
-  ensureDirs()
-  if (!fs.existsSync(PRODUCTS_FILE)) return []
+async function loadProductsFromBlob(): Promise<Product[]> {
   try {
-    const raw = JSON.parse(fs.readFileSync(PRODUCTS_FILE, "utf-8")) as (Product & { efficacy?: string })[]
+    const { blobs } = await list({ prefix: PRODUCTS_BLOB_PATH })
+    const blob = blobs.find(b => b.pathname === PRODUCTS_BLOB_PATH)
+    if (!blob) return []
+    const res = await fetch(blob.url, { cache: "no-store" })
+    if (!res.ok) return []
+    const raw = await res.json() as (Product & { efficacy?: string })[]
     // backward compat: efficacy → ingredients
     return raw.map(p => ({
       ...p,
       ingredients: p.ingredients ?? p.efficacy ?? "",
     }))
-  } catch { return [] }
+  } catch {
+    return []
+  }
+}
+
+async function saveProductsToBlob(products: Product[]): Promise<void> {
+  await put(PRODUCTS_BLOB_PATH, JSON.stringify(products, null, 2), {
+    access: "public",
+    contentType: "application/json",
+    allowOverwrite: true,
+  })
+}
+
+// ─── 公開API ─────────────────────────────────────────────────────
+
+export async function loadProducts(): Promise<Product[]> {
+  return loadProductsFromBlob()
 }
 
 export async function createProduct(params: {
@@ -34,7 +53,6 @@ export async function createProduct(params: {
   imageBase64: string
   imageMime: string
 }): Promise<Product> {
-  ensureDirs()
   const id = crypto.randomUUID()
   const ext = (params.imageMime || "image/jpeg").split("/")[1] || "jpg"
   const buf = Buffer.from(params.imageBase64, "base64")
@@ -55,9 +73,9 @@ export async function createProduct(params: {
     imageUrl: blob.url,
     imageMime: params.imageMime,
   }
-  const products = loadProducts()
+  const products = await loadProductsFromBlob()
   products.unshift(product)
-  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(products, null, 2), "utf-8")
+  await saveProductsToBlob(products)
   return product
 }
 
@@ -72,8 +90,7 @@ export async function updateProduct(id: string, params: {
   imageBase64?: string
   imageMime?: string
 }): Promise<Product> {
-  ensureDirs()
-  const products = loadProducts()
+  const products = await loadProductsFromBlob()
   const idx = products.findIndex(p => p.id === id)
   if (idx === -1) throw new Error("商品が見つかりません")
   const existing = products[idx]
@@ -106,17 +123,16 @@ export async function updateProduct(id: string, params: {
     imageMime,
   }
   products[idx] = updated
-  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(products, null, 2), "utf-8")
+  await saveProductsToBlob(products)
   return updated
 }
 
 export async function deleteProduct(id: string): Promise<void> {
-  ensureDirs()
-  const products = loadProducts()
+  const products = await loadProductsFromBlob()
   const target = products.find(p => p.id === id)
   if (target?.imageUrl) {
     try { await del(target.imageUrl) } catch { /* Blob削除失敗は無視 */ }
   }
   const updated = products.filter(p => p.id !== id)
-  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(updated, null, 2), "utf-8")
+  await saveProductsToBlob(updated)
 }

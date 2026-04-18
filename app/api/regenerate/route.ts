@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     instruction?: string
   }
 
-  const groups = loadGroups()
+  const groups = await loadGroups()
   const group = groups.find(g => g.id === groupId)
   if (!group) return NextResponse.json({ error: "グループが見つかりません" }, { status: 404 })
   if (!group.productImageUrl) return NextResponse.json({ error: "商品画像URLがありません" }, { status: 400 })

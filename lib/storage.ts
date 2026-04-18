@@ -1,45 +1,51 @@
 /**
  * ストレージ層
  * - 画像: Vercel Blob（公開URL）
- * - メタデータ: ローカル data/groups.json（Phase 2 で Supabase に移行予定）
+ * - メタデータ: Vercel Blob（groups.json）— ファイルシステム非依存
  */
-import { put, del } from "@vercel/blob"
-import fs from "fs"
-import path from "path"
+import { put, list, del } from "@vercel/blob"
 import type { PostGroup } from "@/types"
 
-const DATA_DIR    = path.join(process.cwd(), "data")
-const GROUPS_FILE = path.join(DATA_DIR, "groups.json")
+const GROUPS_BLOB_PATH = "cocochi/db/groups.json"
 
-function ensureDirs() {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
-}
+// ─── 内部ユーティリティ ───────────────────────────────────────────
 
-export function loadGroups(): PostGroup[] {
-  ensureDirs()
-  if (!fs.existsSync(GROUPS_FILE)) return []
+async function loadGroupsFromBlob(): Promise<PostGroup[]> {
   try {
-    return JSON.parse(fs.readFileSync(GROUPS_FILE, "utf-8")) as PostGroup[]
-  } catch { return [] }
+    const { blobs } = await list({ prefix: GROUPS_BLOB_PATH })
+    const blob = blobs.find(b => b.pathname === GROUPS_BLOB_PATH)
+    if (!blob) return []
+    const res = await fetch(blob.url, { cache: "no-store" })
+    if (!res.ok) return []
+    return await res.json() as PostGroup[]
+  } catch {
+    return []
+  }
 }
 
-/**
- * グループを保存する
- * - base64 dataURL → Vercel Blob にアップロード → 公開URLに差し替え
- * - メタデータは groups.json に書き込む
- */
+async function saveGroupsToBlob(groups: PostGroup[]): Promise<void> {
+  await put(GROUPS_BLOB_PATH, JSON.stringify(groups, null, 2), {
+    access: "public",
+    contentType: "application/json",
+    allowOverwrite: true,
+  })
+}
+
+// ─── 公開API ─────────────────────────────────────────────────────
+
+export async function loadGroups(): Promise<PostGroup[]> {
+  return loadGroupsFromBlob()
+}
+
 export async function updateGroup(id: string, updated: PostGroup): Promise<void> {
-  ensureDirs()
-  const groups = loadGroups()
+  const groups = await loadGroupsFromBlob()
   const idx = groups.findIndex(g => g.id === id)
   if (idx === -1) return
   groups[idx] = updated
-  fs.writeFileSync(GROUPS_FILE, JSON.stringify(groups, null, 2), "utf-8")
+  await saveGroupsToBlob(groups)
 }
 
 export async function saveGroup(group: PostGroup): Promise<PostGroup> {
-  ensureDirs()
-
   // 商品画像を永続BlobにアップロードしてURLを保存（再生成用）
   let productImageUrl = group.productImageUrl
   if (!productImageUrl && group.productImageBase64) {
@@ -64,7 +70,6 @@ export async function saveGroup(group: PostGroup): Promise<PostGroup> {
     posts: await Promise.all(group.posts.map(async post => ({
       ...post,
       images: await Promise.all(post.images.map(async (dataUrl, i) => {
-        // すでにURLなら再アップロード不要
         if (!dataUrl || dataUrl.startsWith("https://") || dataUrl.startsWith("/api/media/")) {
           return dataUrl
         }
@@ -80,21 +85,15 @@ export async function saveGroup(group: PostGroup): Promise<PostGroup> {
     }))),
   }
 
-  const groups = loadGroups()
+  const groups = await loadGroupsFromBlob()
   groups.unshift(saved)
-  fs.writeFileSync(GROUPS_FILE, JSON.stringify(groups, null, 2), "utf-8")
+  await saveGroupsToBlob(groups)
 
   return saved
 }
 
-/**
- * グループを削除する
- * - Vercel Blob の画像を一括削除
- * - groups.json からも削除
- */
 export async function deleteGroup(id: string): Promise<void> {
-  ensureDirs()
-  const groups = loadGroups()
+  const groups = await loadGroupsFromBlob()
   const target = groups.find(g => g.id === id)
 
   if (target) {
@@ -107,11 +106,5 @@ export async function deleteGroup(id: string): Promise<void> {
   }
 
   const updated = groups.filter(g => g.id !== id)
-  fs.writeFileSync(GROUPS_FILE, JSON.stringify(updated, null, 2), "utf-8")
-}
-
-/** ローカルファイルパスを返す（/api/media/ URLの後方互換用） */
-export function getImagePath(groupId: string, filename: string): string | null {
-  const p = path.join(DATA_DIR, "images", groupId, filename)
-  return fs.existsSync(p) ? p : null
+  await saveGroupsToBlob(updated)
 }

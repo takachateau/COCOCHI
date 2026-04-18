@@ -4,7 +4,7 @@ import { loadProducts, createProduct } from "@/lib/products"
 export const runtime = "nodejs"
 
 export async function GET() {
-  return NextResponse.json(loadProducts())
+  return NextResponse.json(await loadProducts())
 }
 
 export async function POST(req: NextRequest) {
