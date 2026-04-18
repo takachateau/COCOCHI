@@ -5,31 +5,93 @@ function client() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 }
 
+// パターンの順序（route.ts の PATTERN_NAMES と必ず一致させること）
+const ORDERED_PATTERNS = ["エンタメ導入型", "手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
+
 export async function generateArticle(params: {
   productName: string
-  efficacy: string
+  ingredients: string
   howToUse: string
   price?: string
+  appealPoints?: string
+  forbiddenWords?: string
+  pdfText?: string
   target?: string
+  patternAngles?: string[]    // パターン順に対応するアピール角度 [エンタメ, 手持ち, 直置き, 記事]
+  hookTheme?: string          // エンタメ導入型のフックテーマ（外部からランダム指定）
   productImageBase64: string
   productImageMime: string
 }): Promise<{ content: ArticleContent; inputTokens: number; outputTokens: number }> {
-  const { productName, efficacy, howToUse, price, target } = params
+  const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, patternAngles, hookTheme } = params
+
+  const angleDescriptions: Record<string, string> = {
+    // エンタメ導入型プール
+    "感情体験":     "「使ってみたら人生変わった」「衝撃すぎて語らずにいられない」系の感情訴求",
+    "共感・あるある": "「わかる〜これ」「あるあるすぎた」系の共感訴求",
+    "ギャップ体験":  "「使う前と後のギャップが激しすぎた」「最初は半信半疑だったけど」系のギャップ訴求",
+    "衝撃告白":     "「実はずっと悩んでたんだけど」「誰にも言えなかったこと言う」系の告白・暴露訴求",
+    // 手持ちUGC型プール
+    "ビフォーアフター": "「使う前と後でここまで変わった」「〇〇日後の肌が別人すぎた」系の変化訴求",
+    "継続結果レポ":  "「〇〇日間使い続けた結果」「1ヶ月後のリアルな肌を見せる」系の継続訴求",
+    "正直レビュー":  "「忖度なしで言います」「デメリットも全部話す」系のリアル・正直訴求",
+    "周りの反応":    "「急に肌綺麗になったって言われた」「友達に何使ってるか聞かれた」系の反応訴求",
+    // 直置きUGC型プール
+    "ルーティン紹介": "「この1本で朝晩ルーティンが変わった」「毎日必ず使うものを紹介」系の習慣訴求",
+    "時短・ズボラ":   "「ズボラでもできる」「これ1本で終わる時短スキンケア」系の時短訴求",
+    "シーン訴求":    "「旅行に必ず持っていく」「梅雨の時期に手放せない」系のシーン・季節訴求",
+    "映え・世界観":  "「棚に置くだけでサマになる」「パッケージが可愛すぎて飾ってる」系の世界観訴求",
+    // 記事投稿型プール
+    "成分・効果":    "「なぜこれが効くのか成分から解説」「皮膚科医も認める」系の科学的訴求",
+    "皮膚科目線":    "「皮膚科で処方されるあの成分が入ってる」「医師監修レベルの処方」系の専門家訴求",
+    "他社比較":     "「〇〇と比べてみた」「有名どころと成分を並べてみる」系の比較訴求",
+    "ハウツー解説":  "「正しい使い方知ってる？」「この順番で使わないと効果半減」系のハウツー訴求",
+  }
+
+  const angles = (patternAngles && patternAngles.length === 4)
+    ? patternAngles
+    : ["感情体験", "ビフォーアフター", "ルーティン紹介", "成分・効果"]
+
+  const patternLines = ORDERED_PATTERNS.map((pattern, i) => {
+    const angle = angles[i] ?? angles[0]
+    const desc = angleDescriptions[angle] ?? `「${angle}」に関連する独自の切り口で訴求`
+    return `${i + 1}. ${pattern} × ${angle}: ${desc}`
+  }).join("\n")
 
   const prompt = `あなたはInstagramでバズるUGCコンテンツを量産するプロのクリエイターです。
-以下の化粧品について、3つの全く異なる切り口でInstagramカルーセル投稿（5枚1セット）を作成してください。
+以下の化粧品について、4つの全く異なる切り口でInstagramカルーセル投稿（5枚1セット）を作成してください。
 
 【商品情報】
 商品名: ${productName}
-効能・特徴: ${efficacy}
+成分・効能: ${ingredients}
 使い方: ${howToUse}
 ${price ? `価格: ${price}（2枚目のpriceフィールドにこの価格をそのまま使うこと）` : ""}
+${appealPoints ? `アピールポイント・差別化ポイント: ${appealPoints}` : ""}
 ${target ? `ターゲット: ${target}` : ""}
+${pdfText ? `【PDF追加情報】\n${pdfText}` : ""}
 
-【3つの切り口】
-1. 感情体験: 「使ってみたら人生変わった」「衝撃すぎて語らずにいられない」系の感情訴求
-2. 成分・効果: 「なぜこれが効くのか成分から解説」「皮膚科医も認める」系の科学的訴求
-3. ライフスタイル: 「この1本で朝晩ルーティンが変わった」「〇〇するだけで肌が変わる」系の習慣訴求
+${forbiddenWords ? `【禁止ワード（絶対に使用しないこと）】\n${forbiddenWords}\n` : ""}
+
+【4つの投稿（パターンと訴求角度は固定・変更不可）】
+${patternLines}
+
+各投稿の "suggestedPattern" と "angle" は上記の通りに固定すること（重複なし・変更不可）。
+Claudeはパターン・角度の割り当てを考えず、各投稿のコンテンツ内容の質だけに集中すること。
+
+【エンタメ導入型専用ルール（suggestedPattern が "エンタメ導入型" の場合のみ適用）】
+フックテーマは以下に固定（変更不可）: "${hookTheme ?? "恋愛・感情体験"}"
+"hookTheme" フィールドにはこの値をそのまま入れること。
+
+以下の構造タイプからこのテーマに最も合うものを1つ選び "hookStructure" に入れること:
+  感情ストーリー型 / ハウツー連番型 / 炎上・問答型 / 悩み解決型 / 記録・チャレンジ型
+
+"hookTitle" には1枚目のキャッチコピーを入れること（商品名・成分は絶対に含めない。フックテーマだけで完結すること）。
+
+エンタメ導入型のスライド構成:
+1枚目: hookTitleをheadlineに。商品は一切登場しない。フックテーマのみ。tagも商品と無関係に。
+2枚目: フックテーマのストーリー/Tips展開（商品まだ出ない。体験・情報・主張のみ）
+3枚目: さらなる展開（ハウツー連番型ならStep 2〜3、感情系なら転換点）
+4枚目: 「実はずっと使ってたのが〇〇」「そのときケアしてたのが〇〇」など自然に商品登場。bulletPointsに商品の特徴を入れること。
+5枚目: 商品訴求・保存/フォローCTA（「気になった人は保存してね♡」「プロフのリンクからチェック」等）
 
 【スライド構成（各パターン共通）】
 1枚目: 表紙 — 思わずスクロールが止まるキャッチコピー（バズ前提）
@@ -51,13 +113,19 @@ ${target ? `ターゲット: ${target}` : ""}
 pink=フェミニン・保湿系, blue=さっぱり・メンズも, green=オーガニック・敏感肌,
 yellow=ビタミン・明るさ, purple=高級感・エイジング, orange=活力・ニキビケア,
 teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
-※3パターンで別々のcolorPaletteを選ぶこと
+※4パターンで別々のcolorPaletteを選ぶこと
 
+角度名は上記【4つの投稿】で指定したラベルを "angle" フィールドにそのまま使うこと。
+エンタメ導入型の場合は "hookTheme", "hookTitle", "hookStructure" を必ず含めること。
 以下のJSON形式のみで返してください（説明文不要）:
 {
   "articles": [
     {
-      "angle": "感情体験",
+      "angle": "${angles[0]}",
+      "hookTheme": "エンタメ導入型のみ入れる（他はフィールドごと省略）",
+      "hookTitle": "エンタメ導入型のみ入れる（他はフィールドごと省略）",
+      "hookStructure": "エンタメ導入型のみ入れる（他はフィールドごと省略）",
+      "suggestedPattern": "手持ちUGC型",
       "colorPalette": "teal",
       "overallTitle": "この化粧水、やばすぎた件",
       "slides": [
@@ -100,6 +168,7 @@ teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
     },
     {
       "angle": "成分・効果",
+      "suggestedPattern": "記事投稿型",
       "colorPalette": "blue",
       "overallTitle": "成分オタクが認めた神コスメ",
       "slides": [
@@ -142,6 +211,7 @@ teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
     },
     {
       "angle": "ライフスタイル",
+      "suggestedPattern": "直置きUGC型",
       "colorPalette": "pink",
       "overallTitle": "この1本でスキンケアが変わった",
       "slides": [
@@ -179,6 +249,49 @@ teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
           "headline": "スキンケアをシンプルにしたい人に届け",
           "bullets": ["◎ 時短スキンケアしたい", "◎ 色々買いすぎてる人", "◎ 継続できなかった人"],
           "accent": "まずは1本試してみて♡"
+        }
+      ]
+    },
+    {
+      "angle": "ビフォーアフター",
+      "suggestedPattern": "手持ちUGC型",
+      "colorPalette": "purple",
+      "overallTitle": "使う前と後で肌が別人になった話",
+      "slides": [
+        {
+          "slideNumber": 1,
+          "tag": "\\ 衝撃の変化 /",
+          "headline": "2週間後の肌、自分でも信じられなかった",
+          "accent": "ビフォーアフター見て"
+        },
+        {
+          "slideNumber": 2,
+          "tag": "\\ 変化の内訳 /",
+          "headline": "ここまで変わるとは思ってなかった",
+          "bullets": ["✔ 毛穴の開きが目立たなくなった", "✔ くすみが消えてトーンアップ", "✔ 触り心地がツルツルに"],
+          "price": "¥2,200",
+          "accent": "コスパ最高◎"
+        },
+        {
+          "slideNumber": 3,
+          "tag": "\\ なぜ変わった？/",
+          "headline": "この成分が肌を根本から変えた",
+          "bullets": ["✔ ターンオーバーを促進", "✔ メラニン生成を抑制", "✔ バリア機能を強化"],
+          "accent": "仕組みを知ると納得"
+        },
+        {
+          "slideNumber": 4,
+          "tag": "\\ 使い方のコツ /",
+          "headline": "効果を最大化する使い方があった",
+          "bullets": ["→ 朝晩2回が効果的", "→ コットンでなじませると◎", "→ 継続2週間で実感"],
+          "accent": "継続が鍵！"
+        },
+        {
+          "slideNumber": 5,
+          "tag": "\\ こんな人に /",
+          "headline": "変化を実感したい人はぜひ",
+          "bullets": ["◎ 毛穴・くすみが長年の悩み", "◎ 色々試して効果なかった", "◎ 本気で肌変えたい"],
+          "accent": "まず1本試してみて♡"
         }
       ]
     }
@@ -223,14 +336,61 @@ teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
 
   const content = JSON.parse(sanitized) as ArticleContent
 
-  if (!content.articles || content.articles.length < 3) {
-    throw new Error("3パターンの生成に失敗しました")
+  if (!content.articles || content.articles.length < 4) {
+    throw new Error("4パターンの生成に失敗しました")
   }
   return {
     content,
     inputTokens: res.usage.input_tokens,
     outputTokens: res.usage.output_tokens,
   }
+}
+
+/**
+ * Instagram投稿用キャプションを生成
+ * caption.txt がある場合はそのトーン・構成を参考にする
+ * ない場合はスライド内容からゼロで生成
+ */
+export async function generateCaption(params: {
+  productName: string
+  angle: string
+  slides: import("@/types").SlideContent[]
+  referenceCaption?: string
+}): Promise<{ caption: string; inputTokens: number; outputTokens: number }> {
+  const { productName, angle, slides, referenceCaption } = params
+
+  const slidesSummary = slides
+    .map(s => `${s.slideNumber}枚目「${s.headline}」${s.bullets ? s.bullets.join(" / ") : ""}`)
+    .join("\n")
+
+  const refSection = referenceCaption
+    ? `【参考キャプション（このトーン・文体・構成・ハッシュタグを参考にすること）】\n${referenceCaption}\n\n`
+    : ""
+
+  const prompt = `あなたはInstagram投稿のキャプションを書くプロです。
+${refSection}【投稿情報】
+商品名: ${productName}
+切り口: ${angle}
+スライド構成:
+${slidesSummary}
+
+【ルール】
+- 1行目は「もっと見る」の前に来るフック。思わずタップしたくなる1文
+- 実際の20〜30代女性UGCクリエイター風の口語体
+- 改行・空白行を活用して読みやすく
+- ハッシュタグは7〜10個、末尾にまとめる
+- 全体で150〜250字程度
+
+キャプション本文のみ返してください（説明・前置き不要）:`
+
+  const res = await client().messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
+    messages: [{ role: "user", content: prompt }],
+  })
+
+  const caption = res.content[0].type === "text" ? res.content[0].text.trim() : ""
+  return { caption, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens }
 }
 
 /**

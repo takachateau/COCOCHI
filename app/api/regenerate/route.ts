@@ -5,10 +5,12 @@
  *   { groupId }                          → 一括再生成（全4パターン × 5枚）
  *   { groupId, postId }                  → 1パターン再生成（5枚）
  *   { groupId, postId, slideIndex }      → 1枚再生成
+ *
+ * instruction フィールドで修正プロンプトを指定可能（任意）
+ * styleDescription / refImageUrl は Post から自動で引き継がれる
  */
 import { NextRequest, NextResponse } from "next/server"
-import { generateUGCCover, generateContentSlide } from "@/lib/fal"
-import { renderTemplateCover, renderTemplateContentSlide, addSlide2Overlay } from "@/lib/slides"
+import { generateUGCCover, generateContentSlide, generateEntertainmentSlide } from "@/lib/fal"
 import { loadGroups, updateGroup } from "@/lib/storage"
 import { createJob, updateJob, pruneOldJobs } from "@/lib/jobs"
 import { put } from "@vercel/blob"
@@ -35,7 +37,7 @@ export async function POST(req: NextRequest) {
   const postsToRegen = postId ? group.posts.filter(p => p.id === postId) : group.posts
   const slidesCount = slideIndex !== undefined ? postsToRegen.length : postsToRegen.length * 5
   const job = createJob()
-  updateJob(job.id, { totalSlides: slidesCount, completedSlides: 0 })
+  updateJob(job.id, { totalSlides: slidesCount, completedSlides: 0, startTime: Date.now() })
 
   processRegenJob(job.id, group, postsToRegen, slideIndex, instruction).catch(err => {
     updateJob(job.id, { status: "error", error: String(err) })
@@ -59,9 +61,6 @@ async function processRegenJob(
   const productBuf = Buffer.from(await productRes.arrayBuffer())
   const productImageBase64 = productBuf.toString("base64")
 
-  // 商品切り抜き型用バッファ（remove.bg スキップ、元画像をそのまま使用）
-  const cutoutBuffer: Buffer = productBuf
-
   let completedSlides = 0
 
   const updatedPosts: Post[] = await Promise.all(
@@ -74,7 +73,7 @@ async function processRegenJob(
 
       if (slideIndex !== undefined) {
         // 1枚だけ再生成
-        const buf = await regenSlide(post, slideIndex, colorPalette, productImageBase64, cutoutBuffer, instruction)
+        const buf = await regenSlide(post, slideIndex, colorPalette, productImageBase64, instruction)
         const blobUrl = await uploadRegenImage(buf, group.id, post.id, slideIndex)
         newImages[slideIndex] = blobUrl
         completedSlides++
@@ -83,7 +82,7 @@ async function processRegenJob(
         // 5枚全部再生成
         const bufs = await Promise.all(
           post.slides.map(async (_, i) => {
-            const buf = await regenSlide(post, i, colorPalette, productImageBase64, cutoutBuffer, instruction)
+            const buf = await regenSlide(post, i, colorPalette, productImageBase64, instruction)
             completedSlides++
             updateJob(jobId, { completedSlides, progress: `画像再生成中 ${completedSlides}枚完了...` })
             return buf
@@ -109,48 +108,61 @@ async function regenSlide(
   index: number,
   colorPalette: string,
   productImageBase64: string,
-  cutoutBuffer: Buffer,
   instruction?: string,
 ): Promise<Buffer> {
   const slide = post.slides[index]
   if (!slide) throw new Error(`スライド ${index} が存在しません`)
 
-  if (post.patternName === "商品切り抜き型") {
-    if (index === 0) {
-      return renderTemplateCover(slide, cutoutBuffer, colorPalette)
-    } else {
-      return renderTemplateContentSlide(slide, cutoutBuffer, colorPalette, post.overallTitle)
-    }
+  // 初回生成時のスタイル情報を引き継ぐ
+  const styleDescription = post.styleDescription
+  const refImageUrl      = post.refImageUrl
+
+  if (post.patternName === "エンタメ導入型") {
+    return generateEntertainmentSlide({
+      productName:      post.overallTitle,
+      slideNumber:      index + 1,
+      headline:         slide.headline,
+      tag:              slide.tag,
+      bullets:          slide.bullets,
+      accent:           slide.accent,
+      price:            slide.price,
+      hookTheme:        post.hookTheme,
+      hookTitle:        post.hookTitle,
+      colorPalette,
+      productImageBase64,
+      styleDescription,
+      refImageUrl,
+      instruction,
+    })
   } else {
     if (index === 0) {
       return generateUGCCover({
-        productName: post.overallTitle,
-        headline: slide.headline,
-        tag: slide.tag,
-        patternName: post.patternName,
+        productName:      post.overallTitle,
+        headline:         slide.headline,
+        tag:              slide.tag,
+        patternName:      post.patternName,
         colorPalette,
         productImageBase64,
+        styleDescription,
+        refImageUrl,
         instruction,
       })
     } else {
-      let buf = await generateContentSlide({
-        productName: post.overallTitle,
-        slideNumber: index + 1,
-        headline: slide.headline,
-        tag: slide.tag,
-        bullets: slide.bullets,
-        accent: slide.accent,
-        price: slide.price,
-        patternName: post.patternName,
+      return generateContentSlide({
+        productName:      post.overallTitle,
+        slideNumber:      index + 1,
+        headline:         slide.headline,
+        tag:              slide.tag,
+        bullets:          slide.bullets,
+        accent:           slide.accent,
+        price:            slide.price,
+        patternName:      post.patternName,
         colorPalette,
         productImageBase64,
+        styleDescription,
+        refImageUrl,
         instruction,
       })
-      // slide 2（index===1）に商品名＋価格オーバーレイを確実に描画
-      if (index === 1) {
-        buf = await addSlide2Overlay(buf, post.overallTitle, slide.price, colorPalette)
-      }
-      return buf
     }
   }
 }

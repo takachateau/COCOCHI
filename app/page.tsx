@@ -3,11 +3,11 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePosts } from "@/context/posts"
-import { Plus, Download, Trash2, Sparkles, ChevronDown, ChevronUp, X, RefreshCw, Package, Info } from "lucide-react"
+import { Plus, Download, Trash2, Sparkles, ChevronDown, ChevronUp, X, RefreshCw, Package, Info, Copy, Check } from "lucide-react"
 import type { Post, PostGroup, CostSummary } from "@/types"
 
 const PATTERN_ICONS: Record<string, string> = {
-  "商品切り抜き型": "🎨",
+  "エンタメ導入型": "🎬",
   "手持ちUGC型":   "🤳",
   "直置きUGC型":   "🛋️",
   "記事投稿型":    "📰",
@@ -133,6 +133,7 @@ function SlideModal({
   const [previewImg, setPreviewImg] = useState<string | null>(null)
   const [regenIdx, setRegenIdx] = useState<number | null>(null)   // 再生成中のスライドindex
   const [regenMsg, setRegenMsg] = useState("")
+  const [captionCopied, setCaptionCopied] = useState(false)
 
   async function handleRegenSlide(slideIndex: number) {
     if (regenIdx !== null) return
@@ -266,6 +267,36 @@ function SlideModal({
             </div>
           ))}
         </div>
+
+        {/* キャプション */}
+        {post.caption && (
+          <div
+            className="rounded-xl p-4 space-y-2"
+            style={{ background: "var(--bg)", border: "1px solid var(--border)" }}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold" style={{ color: "var(--text)" }}>📝 キャプション</p>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(post.caption!)
+                  setCaptionCopied(true)
+                  setTimeout(() => setCaptionCopied(false), 2000)
+                }}
+                className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-bold transition-colors"
+                style={{
+                  background: captionCopied ? "var(--accent)" : "var(--accent-light)",
+                  color: captionCopied ? "white" : "var(--accent)",
+                }}
+              >
+                {captionCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {captionCopied ? "コピーしました" : "コピー"}
+              </button>
+            </div>
+            <p className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: "var(--muted)" }}>
+              {post.caption}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -281,6 +312,7 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
   const [expanded, setExpanded] = useState(false)
   const [modal, setModal] = useState<Post | null>(null)
   const [expandedPreview, setExpandedPreview] = useState<string | null>(null)
+  const [copiedPostId, setCopiedPostId] = useState<string | null>(null)
 
   // 一括再生成
   const [bulkRegen, setBulkRegen] = useState(false)
@@ -544,6 +576,36 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
                     )
                   })}
                 </div>
+
+                {/* キャプション（展開パネル内） */}
+                {post.caption && (
+                  <div
+                    className="mt-2 rounded-xl p-3"
+                    style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-bold" style={{ color: "var(--muted)" }}>📝 キャプション</p>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(post.caption!)
+                          setCopiedPostId(post.id)
+                          setTimeout(() => setCopiedPostId(null), 2000)
+                        }}
+                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-bold transition-colors"
+                        style={{
+                          background: copiedPostId === post.id ? "var(--accent)" : "var(--accent-light)",
+                          color: copiedPostId === post.id ? "white" : "var(--accent)",
+                        }}
+                      >
+                        {copiedPostId === post.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        {copiedPostId === post.id ? "コピーしました" : "コピー"}
+                      </button>
+                    </div>
+                    <p className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: "var(--muted)" }}>
+                      {post.caption}
+                    </p>
+                  </div>
+                )}
               </div>
             ))}
           </div>

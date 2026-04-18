@@ -3,11 +3,11 @@
 import { useState, useRef } from "react"
 import Link from "next/link"
 import { useProducts } from "@/context/products"
-import { ArrowLeft, Upload, Plus, Trash2, Package, Check, Pencil, X } from "lucide-react"
+import { ArrowLeft, Upload, Plus, Trash2, Package, Check, Pencil, X, FileText, Loader2 } from "lucide-react"
 import type { Product } from "@/types"
 
 function Field({
-  label, value, onChange, placeholder, rows, required,
+  label, value, onChange, placeholder, rows, required, hint,
 }: {
   label: string
   value: string
@@ -15,12 +15,14 @@ function Field({
   placeholder: string
   rows?: number
   required?: boolean
+  hint?: string
 }) {
   return (
     <div>
       <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
         {label} {required && <span style={{ color: "var(--accent)" }}>*</span>}
       </label>
+      {hint && <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>{hint}</p>}
       {!rows || rows === 1 ? (
         <input
           type="text"
@@ -43,6 +45,95 @@ function Field({
     </div>
   )
 }
+
+// ── PDF添付コンポーネント ──────────────────────────────────────────────
+
+function PdfUploader({
+  pdfText, onExtracted,
+}: {
+  pdfText: string
+  onExtracted: (text: string) => void
+}) {
+  const pdfRef = useRef<HTMLInputElement>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [pdfName, setPdfName] = useState("")
+
+  async function handlePdfSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPdfName(file.name)
+    setExtracting(true)
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = ev => {
+          const dataUrl = ev.target?.result as string
+          resolve(dataUrl.split(",")[1] ?? "")
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch("/api/extract-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfBase64: base64 }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      onExtracted(data.text as string)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "PDF読み込みに失敗しました")
+    } finally {
+      setExtracting(false)
+      if (pdfRef.current) pdfRef.current.value = ""
+    }
+  }
+
+  return (
+    <div>
+      <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
+        PDF添付
+        <span className="font-normal ml-1" style={{ color: "var(--muted)" }}>（任意）</span>
+      </label>
+      <p className="text-xs mb-1.5" style={{ color: "var(--muted)" }}>成分表・規格書などのPDFをアップロードすると、内容が自動抽出されて投稿生成に活用されます</p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => pdfRef.current?.click()}
+          disabled={extracting}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
+          style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
+        >
+          {extracting ? (
+            <><Loader2 className="w-3.5 h-3.5 animate-spin" />抽出中...</>
+          ) : (
+            <><FileText className="w-3.5 h-3.5" />PDFを選択</>
+          )}
+        </button>
+        {pdfText && !extracting && (
+          <span className="text-xs" style={{ color: "var(--accent)" }}>✓ 抽出済み{pdfName && ` (${pdfName})`}</span>
+        )}
+      </div>
+      <input ref={pdfRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfSelect} />
+      {pdfText && (
+        <div className="mt-2">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs font-bold" style={{ color: "var(--muted)" }}>抽出内容プレビュー</p>
+            <button onClick={() => onExtracted("")} className="text-xs" style={{ color: "var(--muted)" }}>クリア</button>
+          </div>
+          <div
+            className="px-3 py-2 rounded-lg text-xs overflow-auto max-h-32"
+            style={{ background: "var(--accent-light)", border: "1px solid var(--border)", color: "var(--muted)", whiteSpace: "pre-wrap" }}
+          >
+            {pdfText}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 商品カード ────────────────────────────────────────────────────────
 
 function ProductCard({ product, onEdit, onDelete }: { product: Product; onEdit: () => void; onDelete: () => void }) {
   const [confirm, setConfirm] = useState(false)
@@ -73,10 +164,17 @@ function ProductCard({ product, onEdit, onDelete }: { product: Product; onEdit: 
             {confirm ? <Check className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
           </button>
         </div>
+        {product.pdfText && (
+          <div className="absolute bottom-2 left-2">
+            <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: "white" }}>
+              <FileText className="w-2.5 h-2.5" />PDF
+            </span>
+          </div>
+        )}
       </div>
       <div className="p-3 space-y-1">
         <p className="text-sm font-bold truncate" style={{ color: "var(--text)" }}>{product.name}</p>
-        <p className="text-xs line-clamp-2" style={{ color: "var(--muted)" }}>{product.efficacy}</p>
+        <p className="text-xs line-clamp-2" style={{ color: "var(--muted)" }}>{product.ingredients}</p>
         <div className="flex items-center justify-between">
           {product.price && <p className="text-xs font-bold" style={{ color: "var(--accent)" }}>{product.price}</p>}
           <p className="text-xs ml-auto" style={{ color: "var(--muted)" }}>
@@ -88,17 +186,22 @@ function ProductCard({ product, onEdit, onDelete }: { product: Product; onEdit: 
   )
 }
 
+// ── 編集モーダル ─────────────────────────────────────────────────────
+
 function EditModal({ product, onClose, onSaved }: { product: Product; onClose: () => void; onSaved: (p: Product) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [name, setName]         = useState(product.name)
-  const [efficacy, setEfficacy] = useState(product.efficacy)
-  const [howToUse, setHowToUse] = useState(product.howToUse)
-  const [price, setPrice]       = useState(product.price ?? "")
-  const [preview, setPreview]   = useState<string | null>(product.imageUrl)
-  const [base64, setBase64]     = useState("")
-  const [mime, setMime]         = useState(product.imageMime)
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState<string | null>(null)
+  const [name, setName]               = useState(product.name)
+  const [ingredients, setIngredients] = useState(product.ingredients)
+  const [howToUse, setHowToUse]       = useState(product.howToUse)
+  const [price, setPrice]             = useState(product.price ?? "")
+  const [appealPoints, setAppealPoints] = useState(product.appealPoints ?? "")
+  const [forbiddenWords, setForbiddenWords] = useState(product.forbiddenWords ?? "")
+  const [pdfText, setPdfText]         = useState(product.pdfText ?? "")
+  const [preview, setPreview]         = useState<string | null>(product.imageUrl)
+  const [base64, setBase64]           = useState("")
+  const [mime, setMime]               = useState(product.imageMime)
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState<string | null>(null)
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -114,11 +217,14 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
   }
 
   async function handleSave() {
-    if (!name || !efficacy || !howToUse) { setError("必須項目を入力してください"); return }
+    if (!name || !ingredients || !howToUse) { setError("必須項目を入力してください"); return }
     setSaving(true); setError(null)
     try {
-      const body: Record<string, string> = { name, efficacy, howToUse }
+      const body: Record<string, string> = { name, ingredients, howToUse }
       if (price) body.price = price
+      if (appealPoints) body.appealPoints = appealPoints
+      if (forbiddenWords) body.forbiddenWords = forbiddenWords
+      if (pdfText) body.pdfText = pdfText
       if (base64) { body.imageBase64 = base64; body.imageMime = mime }
       const res = await fetch(`/api/products/${product.id}`, {
         method: "PUT",
@@ -158,9 +264,26 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
 
         <Field label="商品名" value={name} onChange={setName} placeholder="" required />
-        <Field label="効能・特徴" value={efficacy} onChange={setEfficacy} placeholder="" rows={3} required />
+        <Field label="成分表とその効能" value={ingredients} onChange={setIngredients} placeholder="例: セラミド配合で肌バリアを補強。ヒアルロン酸でしっとり..." rows={3} required />
         <Field label="使い方" value={howToUse} onChange={setHowToUse} placeholder="" rows={2} required />
         <Field label="価格（任意）" value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
+        <Field
+          label="アピールポイント（任意）"
+          value={appealPoints}
+          onChange={setAppealPoints}
+          placeholder="例: 敏感肌でも使える・香料フリー・皮膚科医監修"
+          rows={2}
+          hint="競合との差別化ポイントや強みを入力"
+        />
+        <Field
+          label="禁止用語（任意）"
+          value={forbiddenWords}
+          onChange={setForbiddenWords}
+          placeholder="例: 治る・治療・メラニン分解（薬機法NGワード等）"
+          rows={2}
+          hint="投稿で使ってはいけないワードを入力（カンマ区切り）"
+        />
+        <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
 
         {error && <p className="text-xs text-red-600">{error}</p>}
 
@@ -177,21 +300,26 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
   )
 }
 
+// ── メインページ ─────────────────────────────────────────────────────
+
 export default function ProductsPage() {
   const { products, loading, addProduct, updateProduct, removeProduct } = useProducts()
   const fileRef = useRef<HTMLInputElement>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
 
-  const [name, setName]         = useState("")
-  const [efficacy, setEfficacy] = useState("")
-  const [howToUse, setHowToUse] = useState("")
-  const [price, setPrice]       = useState("")
-  const [preview, setPreview]   = useState<string | null>(null)
-  const [base64, setBase64]     = useState("")
-  const [mime, setMime]         = useState("image/jpeg")
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState<string | null>(null)
-  const [success, setSuccess]   = useState(false)
+  const [name, setName]                   = useState("")
+  const [ingredients, setIngredients]     = useState("")
+  const [howToUse, setHowToUse]           = useState("")
+  const [price, setPrice]                 = useState("")
+  const [appealPoints, setAppealPoints]   = useState("")
+  const [forbiddenWords, setForbiddenWords] = useState("")
+  const [pdfText, setPdfText]             = useState("")
+  const [preview, setPreview]             = useState<string | null>(null)
+  const [base64, setBase64]               = useState("")
+  const [mime, setMime]                   = useState("image/jpeg")
+  const [saving, setSaving]               = useState(false)
+  const [error, setError]                 = useState<string | null>(null)
+  const [success, setSuccess]             = useState(false)
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -207,8 +335,8 @@ export default function ProductsPage() {
   }
 
   async function handleSave() {
-    if (!name || !efficacy || !howToUse || !base64) {
-      setError("すべての必須項目を入力してください")
+    if (!name || !ingredients || !howToUse || !base64) {
+      setError("必須項目（商品名・成分・使い方・画像）をすべて入力してください")
       return
     }
     setSaving(true)
@@ -217,13 +345,22 @@ export default function ProductsPage() {
       const res = await fetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, efficacy, howToUse, price: price || undefined, imageBase64: base64, imageMime: mime }),
+        body: JSON.stringify({
+          name, ingredients, howToUse,
+          price: price || undefined,
+          appealPoints: appealPoints || undefined,
+          forbiddenWords: forbiddenWords || undefined,
+          pdfText: pdfText || undefined,
+          imageBase64: base64,
+          imageMime: mime,
+        }),
       })
       const data = await res.json()
       if (!res.ok || data.error) throw new Error(data.error ?? "登録失敗")
       addProduct(data as Product)
       // フォームリセット
-      setName(""); setEfficacy(""); setHowToUse(""); setPrice("")
+      setName(""); setIngredients(""); setHowToUse(""); setPrice("")
+      setAppealPoints(""); setForbiddenWords(""); setPdfText("")
       setPreview(null); setBase64(""); setMime("image/jpeg")
       if (fileRef.current) fileRef.current.value = ""
       setSuccess(true)
@@ -262,7 +399,7 @@ export default function ProductsPage() {
 
       <main className="max-w-screen-2xl mx-auto px-6 py-8 flex gap-8">
         {/* ── 登録フォーム ── */}
-        <div className="flex-shrink-0 w-72 space-y-4">
+        <div className="flex-shrink-0 w-80 space-y-4">
           <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>新規商品を登録</h2>
 
           {/* 商品画像 */}
@@ -294,9 +431,34 @@ export default function ProductsPage() {
           </div>
 
           <Field label="商品名" value={name} onChange={setName} placeholder="例: 22:00 アネトス クレンジングウォーター" required />
-          <Field label="効能・特徴" value={efficacy} onChange={setEfficacy} placeholder="例: サリチル酸配合で毛穴の黒ずみをケア..." rows={3} required />
-          <Field label="使い方" value={howToUse} onChange={setHowToUse} placeholder="例: コットンに染み込ませて拭き取る" rows={2} required />
+          <Field
+            label="成分表とその効能"
+            value={ingredients}
+            onChange={setIngredients}
+            placeholder="例: サリチル酸（BHA）配合で毛穴の黒ずみをケア。セラミドNP・AP・EOPで肌バリアを補強..."
+            rows={4}
+            required
+            hint="主要成分と、それぞれの効能をできるだけ詳しく"
+          />
+          <Field label="使い方" value={howToUse} onChange={setHowToUse} placeholder="例: コットンに染み込ませて優しく拭き取る。毛穴が気になる部分は重ねづけ" rows={2} required />
           <Field label="価格（任意）" value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
+          <Field
+            label="アピールポイント（任意）"
+            value={appealPoints}
+            onChange={setAppealPoints}
+            placeholder="例: 敏感肌処方・無香料・皮膚科医監修・日本製・詰め替え対応"
+            rows={2}
+            hint="競合との差別化ポイント・強みを入力"
+          />
+          <Field
+            label="禁止用語（任意）"
+            value={forbiddenWords}
+            onChange={setForbiddenWords}
+            placeholder="例: 治る, 治療する, メラニン分解, シミが消える"
+            rows={2}
+            hint="薬機法NGワードや使いたくない表現（カンマ区切り）"
+          />
+          <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
 
           {error && (
             <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200">

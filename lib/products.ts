@@ -14,15 +14,23 @@ export function loadProducts(): Product[] {
   ensureDirs()
   if (!fs.existsSync(PRODUCTS_FILE)) return []
   try {
-    return JSON.parse(fs.readFileSync(PRODUCTS_FILE, "utf-8")) as Product[]
+    const raw = JSON.parse(fs.readFileSync(PRODUCTS_FILE, "utf-8")) as (Product & { efficacy?: string })[]
+    // backward compat: efficacy → ingredients
+    return raw.map(p => ({
+      ...p,
+      ingredients: p.ingredients ?? p.efficacy ?? "",
+    }))
   } catch { return [] }
 }
 
 export async function createProduct(params: {
   name: string
-  efficacy: string
+  ingredients: string
   howToUse: string
   price?: string
+  appealPoints?: string
+  forbiddenWords?: string
+  pdfText?: string
   imageBase64: string
   imageMime: string
 }): Promise<Product> {
@@ -38,9 +46,12 @@ export async function createProduct(params: {
     id,
     createdAt: new Date().toISOString(),
     name: params.name,
-    efficacy: params.efficacy,
+    ingredients: params.ingredients,
     howToUse: params.howToUse,
     price: params.price || undefined,
+    appealPoints: params.appealPoints || undefined,
+    forbiddenWords: params.forbiddenWords || undefined,
+    pdfText: params.pdfText || undefined,
     imageUrl: blob.url,
     imageMime: params.imageMime,
   }
@@ -52,9 +63,12 @@ export async function createProduct(params: {
 
 export async function updateProduct(id: string, params: {
   name: string
-  efficacy: string
+  ingredients: string
   howToUse: string
   price?: string
+  appealPoints?: string
+  forbiddenWords?: string
+  pdfText?: string
   imageBase64?: string
   imageMime?: string
 }): Promise<Product> {
@@ -82,9 +96,12 @@ export async function updateProduct(id: string, params: {
   const updated: Product = {
     ...existing,
     name: params.name,
-    efficacy: params.efficacy,
+    ingredients: params.ingredients,
     howToUse: params.howToUse,
     price: params.price || undefined,
+    appealPoints: params.appealPoints || undefined,
+    forbiddenWords: params.forbiddenWords || undefined,
+    pdfText: params.pdfText ?? existing.pdfText,
     imageUrl,
     imageMime,
   }
