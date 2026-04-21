@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   }
 
   pruneOldJobs()
-  const job = createJob()
+  const job = await createJob()
 
   // jobId と body を返す。クライアントが /api/generate/run を fire-and-forget で呼ぶ。
   return NextResponse.json({ jobId: job.id, body })

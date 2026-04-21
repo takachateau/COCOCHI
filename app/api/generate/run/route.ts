@@ -10,7 +10,8 @@ import { generateUGCCover, generateContentSlide, generateEntertainmentSlide } fr
 import { detectMood, selectPostFolder, mapSlidesToRefs, uploadRefMapping, selectEntertainmentStyle, readCaption } from "@/lib/reference"
 import type { UploadedRefMapping } from "@/lib/reference"
 import { saveGroup } from "@/lib/storage"
-import { getJob, updateJob } from "@/lib/jobs"
+import { getJob, writeJob, writeJobAsync } from "@/lib/jobs"
+import type { Job } from "@/lib/jobs"
 import type { ProductInput, Post, PostGroup, CostSummary } from "@/types"
 import { PATTERN_NAMES, PATTERN_ANGLE_POOLS } from "../route"
 
@@ -61,23 +62,33 @@ const HOOK_THEMES = [
 
 export async function POST(req: NextRequest) {
   const { jobId, body } = await req.json() as { jobId: string; body: ProductInput }
-
-  // processJob を await することでこのサーバーレス関数が生き続ける（maxDuration=300）
-  // クライアントが接続を切っても Vercel はレスポンスを返すまで関数を維持する
   await processJob(jobId, body)
-
   return NextResponse.json({ ok: true })
 }
 
 async function processJob(jobId: string, body: ProductInput) {
   const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, appealAngles, productImageBase64, productImageMime } = body
 
-  try {
-    // このlambdaインスタンスはジョブを知らないのでBlobからロードしてメモリに載せる
-    // これをしないと updateJob が jobs.get(id) === undefined でサイレントに失敗する
-    await getJob(jobId)
+  // Blobからジョブを読み込みローカルにコピーを持つ
+  // updateはローカル変数を更新しBlobへ書き込む（progress: fire-and-forget / 完了・エラー: await）
+  let job = await getJob(jobId)
+  if (!job) {
+    console.error(`[run] job ${jobId} が見つかりません`)
+    return
+  }
 
-    updateJob(jobId, { status: "generating", progress: "Claudeがコンテンツを考えています...", startTime: Date.now() })
+  function updateProgress(patch: Partial<Job>): void {
+    job = { ...job!, ...patch }
+    writeJobAsync(job)  // fire-and-forget（頻繁な進捗更新）
+  }
+
+  async function updateStatus(patch: Partial<Job>): Promise<void> {
+    job = { ...job!, ...patch }
+    await writeJob(job)  // await（完了・エラーなど重要な状態変化）
+  }
+
+  try {
+    await updateStatus({ status: "generating", progress: "Claudeがコンテンツを考えています...", startTime: Date.now() })
 
     const patternAngles = PATTERN_NAMES.map((pattern, i) => {
       const userAngle = appealAngles?.[i]?.trim()
@@ -103,7 +114,7 @@ async function processJob(jobId: string, body: ProductInput) {
     const ARTICLE_INDICES = PATTERN_NAMES.map((_, i) => i)
 
     // 2. ムード判定
-    updateJob(jobId, { progress: "参考スタイルを解析中..." })
+    updateProgress({ progress: "参考スタイルを解析中..." })
     const removeBgUsed = false
 
     const mood = await detectMood(`${ingredients} ${howToUse}`)
@@ -156,7 +167,7 @@ async function processJob(jobId: string, body: ProductInput) {
     }
 
     // 4. 4パターン × スライド並列生成
-    updateJob(jobId, { progress: "画像を生成中（2〜4分かかります）..." })
+    updateProgress({ progress: "画像を生成中（2〜4分かかります）..." })
 
     let completedSlides = 0
     const totalSlides   = 20
@@ -173,8 +184,8 @@ async function processJob(jobId: string, body: ProductInput) {
         try {
           if (patternName === "エンタメ導入型") {
             const allSlides = await Promise.all(
-              article.slides.map(async (slide, i) => {
-                const slideNumber = i + 1
+              article.slides.map(async (slide, slideIdx) => {
+                const slideNumber = slideIdx + 1
                 const buf = await generateEntertainmentSlide({
                   productName,
                   slideNumber,
@@ -191,7 +202,7 @@ async function processJob(jobId: string, body: ProductInput) {
                   refImageUrl:      ref?.thumbnailUrl,
                 })
                 completedSlides++
-                updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
+                updateProgress({ completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
                 return buf
               })
             )
@@ -209,7 +220,7 @@ async function processJob(jobId: string, body: ProductInput) {
               styleDescription: ref?.styleDescription,
             })
             completedSlides++
-            updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
+            updateProgress({ completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
             coverImageStr = `data:image/jpeg;base64,${coverBuffer.toString("base64")}`
 
             contentBuffers = await Promise.all(
@@ -230,7 +241,7 @@ async function processJob(jobId: string, body: ProductInput) {
                   styleDescription: ref?.styleDescription,
                 })
                 completedSlides++
-                updateJob(jobId, { completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
+                updateProgress({ completedSlides, progress: `画像生成中 ${completedSlides}/${totalSlides}枚...` })
                 return buf
               })
             )
@@ -305,7 +316,7 @@ async function processJob(jobId: string, body: ProductInput) {
 
     const costSummary = calcCost({ falImages, claudeInputTokens, claudeOutputTokens, removeBgUsed })
 
-    updateJob(jobId, { progress: "保存中..." })
+    updateProgress({ progress: "保存中..." })
     const group: PostGroup = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -317,9 +328,9 @@ async function processJob(jobId: string, body: ProductInput) {
     }
     const savedGroup = await saveGroup(group)
 
-    updateJob(jobId, { status: "done", progress: "完了", group: savedGroup })
+    await updateStatus({ status: "done", progress: "完了", group: savedGroup })
   } catch (err) {
     console.error("[run] processJob失敗:", err)
-    updateJob(jobId, { status: "error", error: String(err) })
+    await updateStatus({ status: "error", error: String(err) })
   }
 }

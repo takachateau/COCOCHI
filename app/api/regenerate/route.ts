@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
 
   const postsToRegen = postId ? group.posts.filter(p => p.id === postId) : group.posts
   const slidesCount = slideIndex !== undefined ? postsToRegen.length : postsToRegen.length * 5
-  const job = createJob()
-  updateJob(job.id, { totalSlides: slidesCount, completedSlides: 0, startTime: Date.now() })
+  const job = await createJob()
+  await updateJob(job.id, { totalSlides: slidesCount, completedSlides: 0, startTime: Date.now() })
 
   processRegenJob(job.id, group, postsToRegen, slideIndex, instruction).catch(err => {
     updateJob(job.id, { status: "error", error: String(err) })

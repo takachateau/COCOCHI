@@ -1,10 +1,9 @@
 /**
- * ジョブ管理
- * - メモリキャッシュ（同一インスタンス内の高速アクセス用）
- * - Vercel Blob（インスタンス間の共有・永続化）
+ * ジョブ管理（Vercel Blob永続化）
  *
- * Vercelはリクエストごとに別インスタンスで動くため、
- * ジョブ状態をBlobに保存してどのインスタンスからも読めるようにする。
+ * - メモリキャッシュは廃止（インスタンス間で状態が共有されないため）
+ * - 常にBlobから読み書き
+ * - CDNキャッシュ対策: 読み取り時にURLへタイムスタンプを付与
  */
 
 import { put, list } from "@vercel/blob"
@@ -24,30 +23,44 @@ export interface Job {
   startTime?: number
 }
 
-// ─── メモリキャッシュ（同一インスタンス内） ──────────────────────
-
-const g = globalThis as typeof globalThis & { __cocochi_jobs?: Map<string, Job> }
-if (!g.__cocochi_jobs) g.__cocochi_jobs = new Map<string, Job>()
-const jobs = g.__cocochi_jobs
-
-// ─── Blob 永続化 ─────────────────────────────────────────────────
-
 function jobBlobPath(id: string) {
   return `cocochi/jobs/${id}.json`
 }
 
-function persistJob(job: Job): void {
-  // fire-and-forget（エラーは無視）
-  put(jobBlobPath(job.id), JSON.stringify(job), {
+// ─── Blob 書き込み ─────────────────────────────────────────────────
+
+export async function writeJob(job: Job): Promise<void> {
+  await put(jobBlobPath(job.id), JSON.stringify(job), {
     access: "public",
     contentType: "application/json",
     allowOverwrite: true,
-  }).catch(e => console.warn("[jobs] Blob保存失敗:", e))
+  })
 }
 
-// ─── 公開API ─────────────────────────────────────────────────────
+// fire-and-forget 書き込み（進捗更新など頻繁な更新に使用）
+export function writeJobAsync(job: Job): void {
+  writeJob(job).catch(e => console.warn("[jobs] Blob書き込み失敗:", e))
+}
 
-export function createJob(): Job {
+// ─── Blob 読み込み ─────────────────────────────────────────────────
+
+export async function getJob(id: string): Promise<Job | undefined> {
+  try {
+    const { blobs } = await list({ prefix: jobBlobPath(id) })
+    const blob = blobs.find(b => b.pathname === jobBlobPath(id))
+    if (!blob) return undefined
+    // ?t= でVercel BlobのCDNキャッシュをバイパス
+    const res = await fetch(`${blob.url}?t=${Date.now()}`, { cache: "no-store" })
+    if (!res.ok) return undefined
+    return await res.json() as Job
+  } catch {
+    return undefined
+  }
+}
+
+// ─── 公開API ─────────────────────────────────────────────────────────
+
+export async function createJob(): Promise<Job> {
   const job: Job = {
     id: crypto.randomUUID(),
     status: "pending",
@@ -56,42 +69,20 @@ export function createJob(): Job {
     totalSlides: 20,
     createdAt: Date.now(),
   }
-  jobs.set(job.id, job)
-  persistJob(job)
+  await writeJob(job)
   return job
 }
 
-export async function getJob(id: string): Promise<Job | undefined> {
-  // まずメモリキャッシュを確認
-  const cached = jobs.get(id)
-  if (cached) return cached
-
-  // なければBlobから取得
-  try {
-    const { blobs } = await list({ prefix: jobBlobPath(id) })
-    const blob = blobs.find(b => b.pathname === jobBlobPath(id))
-    if (!blob) return undefined
-    const res = await fetch(blob.url, { cache: "no-store" })
-    if (!res.ok) return undefined
-    const job = await res.json() as Job
-    jobs.set(id, job)
-    return job
-  } catch {
-    return undefined
+// updateJob: 既存データを読んでマージして書き込む（regenerateなど低頻度用）
+export async function updateJob(id: string, patch: Partial<Job>): Promise<void> {
+  const existing = await getJob(id)
+  if (!existing) {
+    console.warn(`[jobs] updateJob: job ${id} が見つかりません`)
+    return
   }
-}
-
-export function updateJob(id: string, patch: Partial<Job>): void {
-  const job = jobs.get(id)
-  if (!job) return
-  const updated = { ...job, ...patch }
-  jobs.set(id, updated)
-  persistJob(updated)
+  await writeJob({ ...existing, ...patch })
 }
 
 export function pruneOldJobs(): void {
-  const cutoff = Date.now() - 60 * 60 * 1000
-  for (const [id, job] of jobs) {
-    if (job.createdAt < cutoff) jobs.delete(id)
-  }
+  // Blobベースのため不要（no-op）
 }
