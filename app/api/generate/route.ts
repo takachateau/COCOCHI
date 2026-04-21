@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import { generateArticle, qcScore, generateCaption } from "@/lib/claude"
 import { generateUGCCover, generateContentSlide, generateEntertainmentSlide } from "@/lib/fal"
 import { detectMood, selectPostFolder, mapSlidesToRefs, uploadRefMapping, selectEntertainmentStyle, readCaption } from "@/lib/reference"
@@ -55,8 +55,11 @@ export async function POST(req: NextRequest) {
   pruneOldJobs()
 
   const job = createJob()
-  processJob(job.id, body).catch(err => {
-    updateJob(job.id, { status: "error", error: String(err) })
+
+  after(() => {
+    processJob(job.id, body).catch(err => {
+      updateJob(job.id, { status: "error", error: String(err) })
+    })
   })
 
   return NextResponse.json({ jobId: job.id })
