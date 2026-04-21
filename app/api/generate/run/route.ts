@@ -318,7 +318,7 @@ async function processJob(jobId: string, body: ProductInput) {
     }
     const savedGroup = await saveGroup(group)
 
-    await updateStatus({ status: "done", progress: "完了", group: savedGroup })
+    await updateStatus({ status: "done", progress: "完了", groupId: savedGroup.id })
   } catch (err) {
     console.error("[run] processJob失敗:", err)
     await updateStatus({ status: "error", error: String(err) })

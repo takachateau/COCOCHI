@@ -100,7 +100,7 @@ async function processRegenJob(
   const updatedGroup: PostGroup = { ...group, posts: updatedPosts }
   await updateGroup(group.id, updatedGroup)
 
-  updateJob(jobId, { status: "done", progress: "完了", group: updatedGroup })
+  await updateJob(jobId, { status: "done", progress: "完了", groupId: updatedGroup.id })
 }
 
 async function regenSlide(
