@@ -17,12 +17,12 @@ export async function generateArticle(params: {
   forbiddenWords?: string
   pdfText?: string
   target?: string
-  patternAngles?: string[]    // パターン順に対応するアピール角度 [エンタメ, 手持ち, 直置き, 記事]
+  slots: { pattern: string; angle: string }[]  // 4スロット分のパターン×角度
   hookTheme?: string          // エンタメ導入型のフックテーマ（外部からランダム指定）
   productImageBase64: string
   productImageMime: string
 }): Promise<{ content: ArticleContent; inputTokens: number; outputTokens: number }> {
-  const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, patternAngles, hookTheme } = params
+  const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, slots, hookTheme } = params
 
   const angleDescriptions: Record<string, string> = {
     // エンタメ導入型プール
@@ -47,14 +47,9 @@ export async function generateArticle(params: {
     "ハウツー解説":  "「正しい使い方知ってる？」「この順番で使わないと効果半減」系のハウツー訴求",
   }
 
-  const angles = (patternAngles && patternAngles.length === 4)
-    ? patternAngles
-    : ["感情体験", "ビフォーアフター", "ルーティン紹介", "成分・効果"]
-
-  const patternLines = ORDERED_PATTERNS.map((pattern, i) => {
-    const angle = angles[i] ?? angles[0]
-    const desc = angleDescriptions[angle] ?? `「${angle}」に関連する独自の切り口で訴求`
-    return `${i + 1}. ${pattern} × ${angle}: ${desc}`
+  const patternLines = slots.map((slot, i) => {
+    const desc = angleDescriptions[slot.angle] ?? `「${slot.angle}」に関連する独自の切り口で訴求`
+    return `${i + 1}. ${slot.pattern} × ${slot.angle}: ${desc}`
   }).join("\n")
 
   const prompt = `あなたはInstagramでバズるUGCコンテンツを量産するプロのクリエイターです。
@@ -74,7 +69,7 @@ ${forbiddenWords ? `【禁止ワード（絶対に使用しないこと）】\n$
 【4つの投稿（パターンと訴求角度は固定・変更不可）】
 ${patternLines}
 
-各投稿の "suggestedPattern" と "angle" は上記の通りに固定すること（重複なし・変更不可）。
+各投稿の "suggestedPattern" と "angle" は上記の通りに固定すること（変更不可）。
 Claudeはパターン・角度の割り当てを考えず、各投稿のコンテンツ内容の質だけに集中すること。
 
 【エンタメ導入型専用ルール（suggestedPattern が "エンタメ導入型" の場合のみ適用）】
@@ -121,7 +116,7 @@ teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
 {
   "articles": [
     {
-      "angle": "${angles[0]}",
+      "angle": "${slots[0]?.angle ?? "感情体験"}",
       "hookTheme": "エンタメ導入型のみ入れる（他はフィールドごと省略）",
       "hookTitle": "エンタメ導入型のみ入れる（他はフィールドごと省略）",
       "hookStructure": "エンタメ導入型のみ入れる（他はフィールドごと省略）",

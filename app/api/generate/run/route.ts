@@ -67,10 +67,15 @@ export async function POST(req: NextRequest) {
 }
 
 async function processJob(jobId: string, body: ProductInput) {
-  const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, appealAngles, productImageBase64, productImageMime } = body
+  const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, productImageBase64, productImageMime } = body
+
+  // スロット設定（未指定時はデフォルト4パターンをランダム角度で）
+  const slots = body.slots ?? PATTERN_NAMES.map(pattern => ({
+    pattern,
+    angle: pickRandom(PATTERN_ANGLE_POOLS[pattern]),
+  }))
 
   // Blobからジョブを読み込みローカルにコピーを持つ
-  // updateはローカル変数を更新しBlobへ書き込む（progress: fire-and-forget / 完了・エラー: await）
   let job = await getJob(jobId)
   if (!job) {
     console.error(`[run] job ${jobId} が見つかりません`)
@@ -79,22 +84,18 @@ async function processJob(jobId: string, body: ProductInput) {
 
   function updateProgress(patch: Partial<Job>): void {
     job = { ...job!, ...patch }
-    writeJobAsync(job)  // fire-and-forget（頻繁な進捗更新）
+    writeJobAsync(job)
   }
 
   async function updateStatus(patch: Partial<Job>): Promise<void> {
     job = { ...job!, ...patch }
-    await writeJob(job)  // await（完了・エラーなど重要な状態変化）
+    await writeJob(job)
   }
 
   try {
     await updateStatus({ status: "generating", progress: "Claudeがコンテンツを考えています...", startTime: Date.now() })
 
-    const patternAngles = PATTERN_NAMES.map((pattern, i) => {
-      const userAngle = appealAngles?.[i]?.trim()
-      return userAngle || pickRandom(PATTERN_ANGLE_POOLS[pattern])
-    })
-    console.log(`[run] patternAngles: ${patternAngles.join(" / ")}`)
+    console.log(`[run] slots: ${slots.map(s => `${s.pattern}×${s.angle}`).join(" / ")}`)
 
     const hookTheme = pickRandom([...HOOK_THEMES])
     console.log(`[run] hookTheme: ${hookTheme}`)
@@ -103,15 +104,13 @@ async function processJob(jobId: string, body: ProductInput) {
     const articleResult = await generateArticle({
       productName, ingredients, howToUse, price,
       appealPoints, forbiddenWords, pdfText,
-      target, patternAngles,
+      target, slots,
       hookTheme,
       productImageBase64, productImageMime,
     })
     const { content } = articleResult
     let claudeInputTokens  = articleResult.inputTokens
     let claudeOutputTokens = articleResult.outputTokens
-
-    const ARTICLE_INDICES = PATTERN_NAMES.map((_, i) => i)
 
     // 2. ムード判定
     updateProgress({ progress: "参考スタイルを解析中..." })
@@ -120,63 +119,54 @@ async function processJob(jobId: string, body: ProductInput) {
     const mood = await detectMood(`${ingredients} ${howToUse}`)
     console.log(`[run] detected mood: ${mood}`)
 
-    // 3. 参照画像マッピングを並列で取得
-    const refMappings: Record<string, UploadedRefMapping> = {}
-    const postKeyMap:  Record<string, string> = {}
+    // 3. スロットごとに参照画像マッピングを並列取得（index をキーにして重複パターンに対応）
+    const refMappings: Record<number, UploadedRefMapping> = {}
+    const captionRefMap: Record<number, string | undefined> = {}
 
-    const UGC_PATTERNS = ["手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
+    await Promise.all(
+      slots.map(async (slot, i) => {
+        const article = content.articles[i]
+        if (slot.pattern === "エンタメ導入型") {
+          try {
+            const ref = await selectEntertainmentStyle(mood)
+            if (ref) refMappings[i] = ref
+          } catch (e) {
+            console.warn(`[run] スロット${i} エンタメ style 失敗:`, e)
+          }
+        } else {
+          const postKey = selectPostFolder(slot.pattern, mood)
+          if (!postKey) return
+          captionRefMap[i] = readCaption(postKey) ?? undefined
 
-    await Promise.all([
-      (async () => {
-        try {
-          const ref = await selectEntertainmentStyle(mood)
-          if (ref) refMappings["エンタメ導入型"] = ref
-        } catch (e) {
-          console.warn("[run] エンタメ導入型 style 失敗:", e)
+          const slides = article.slides.slice(1).map((s, j) => ({
+            slideNumber: j + 2,
+            headline:    s.headline,
+            tag:         s.tag,
+            bullets:     s.bullets,
+          }))
+          try {
+            const mapping = await mapSlidesToRefs(postKey, slides)
+            refMappings[i] = await uploadRefMapping(mapping)
+            console.log(`[run] スロット${i} ref uploaded: ${postKey}`)
+          } catch (e) {
+            console.warn(`[run] スロット${i} 参照マッピング失敗:`, e)
+          }
         }
-      })(),
-      ...UGC_PATTERNS.map(async patternName => {
-        const articleIdx = ARTICLE_INDICES[PATTERN_NAMES.indexOf(patternName)]
-        const article    = content.articles[articleIdx]
-        const postKey    = selectPostFolder(patternName, mood)
-        if (!postKey) return
-        postKeyMap[patternName] = postKey
+      })
+    )
 
-        const slides = article.slides.slice(1).map((s, j) => ({
-          slideNumber: j + 2,
-          headline:    s.headline,
-          tag:         s.tag,
-          bullets:     s.bullets,
-        }))
-
-        try {
-          const mapping = await mapSlidesToRefs(postKey, slides)
-          refMappings[patternName] = await uploadRefMapping(mapping)
-          console.log(`[run] ref uploaded for ${patternName}: ${postKey}`)
-        } catch (e) {
-          console.warn(`[run] 参照マッピング失敗 ${patternName}:`, e)
-        }
-      }),
-    ])
-
-    // キャプション参照
-    const captionRefMap: Record<string, string | undefined> = {}
-    for (const [patternName, postKey] of Object.entries(postKeyMap)) {
-      const cap = readCaption(postKey)
-      if (cap) captionRefMap[patternName] = cap
-    }
-
-    // 4. 4パターン × スライド並列生成
+    // 4. 4スロット × スライド並列生成
     updateProgress({ progress: "画像を生成中（2〜4分かかります）..." })
 
     let completedSlides = 0
     const totalSlides   = 20
-    const falImages     = 15
+    const falImages     = 20  // 4スロット × 5枚
 
     const postResults = await Promise.all(
-      PATTERN_NAMES.map(async (patternName, i) => {
-        const article = content.articles[ARTICLE_INDICES[i]]
-        const ref     = refMappings[patternName]
+      slots.map(async (slot, i) => {
+        const patternName = slot.pattern
+        const article = content.articles[i]
+        const ref     = refMappings[i]
 
         let coverImageStr = ""
         let contentBuffers: Buffer[]
@@ -266,7 +256,7 @@ async function processJob(jobId: string, body: ProductInput) {
                 productName,
                 angle: article.angle,
                 slides: article.slides,
-                referenceCaption: captionRefMap[patternName],
+                referenceCaption: captionRefMap[i],
               })
             } catch {
               return { caption: "", inputTokens: 0, outputTokens: 0 }

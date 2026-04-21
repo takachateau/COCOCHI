@@ -8,23 +8,28 @@ import { useProducts } from "@/context/products"
 import type { PostGroup, ProductInput, Product } from "@/types"
 
 // パターン定義（route.ts の PATTERN_NAMES / PATTERN_ANGLE_POOLS と必ず一致させること）
-const ORDERED_PATTERNS = ["エンタメ導入型", "手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
+const ALL_PATTERNS = ["エンタメ導入型", "手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
+type PatternName = typeof ALL_PATTERNS[number]
 
-const PATTERN_ANGLE_POOLS: Record<string, string[]> = {
+const PATTERN_ANGLE_POOLS: Record<PatternName, string[]> = {
   "エンタメ導入型": ["感情体験", "共感・あるある", "ギャップ体験", "衝撃告白"],
   "手持ちUGC型":   ["ビフォーアフター", "継続結果レポ", "正直レビュー", "周りの反応"],
   "直置きUGC型":   ["ルーティン紹介", "時短・ズボラ", "シーン訴求", "映え・世界観"],
   "記事投稿型":    ["成分・効果", "皮膚科目線", "他社比較", "ハウツー解説"],
 }
 
-function randomAngles(): string[] {
-  return ORDERED_PATTERNS.map(p => {
-    const pool = PATTERN_ANGLE_POOLS[p]
-    return pool[Math.floor(Math.random() * pool.length)]
-  })
+interface Slot { pattern: PatternName; angle: string }
+
+function randomSlot(pattern: PatternName): Slot {
+  const pool = PATTERN_ANGLE_POOLS[pattern]
+  return { pattern, angle: pool[Math.floor(Math.random() * pool.length)] }
 }
 
-const PATTERN_ICONS: Record<string, string> = {
+function randomSlots(): Slot[] {
+  return ALL_PATTERNS.map(randomSlot)
+}
+
+const PATTERN_ICONS: Record<PatternName, string> = {
   "エンタメ導入型": "🎬",
   "手持ちUGC型":   "🤳",
   "直置きUGC型":   "🛋️",
@@ -154,9 +159,9 @@ export default function GeneratePage() {
   const [imageMime, setImageMime]       = useState("image/jpeg")
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // アピール設定（両モード共通）
-  const [target, setTarget]             = useState("")
-  const [appealAngles, setAppealAngles] = useState<string[]>(() => randomAngles())
+  // スロット設定（両モード共通）
+  const [target, setTarget] = useState("")
+  const [slots, setSlots]   = useState<Slot[]>(randomSlots)
 
   // 生成状態
   const [loading, setLoading]   = useState(false)
@@ -246,7 +251,7 @@ export default function GeneratePage() {
         forbiddenWords: mode === "registered" ? (selectedProduct?.forbiddenWords ?? undefined) : undefined,
         pdfText: mode === "registered" ? (selectedProduct?.pdfText ?? undefined) : undefined,
         target: target || undefined,
-        appealAngles: appealAngles.every(a => a.trim()) ? appealAngles : undefined,
+        slots,
         productImageBase64: imageBase64,
         productImageMime: imageMime,
       }
@@ -492,18 +497,14 @@ export default function GeneratePage() {
               </div>
             )}
 
-            {/* ── アピール設定（共通・任意） ── */}
+            {/* ── 投稿スロット設定 ── */}
             <div
               className="rounded-xl p-4 space-y-3"
               style={{ background: "var(--card)", border: "1px solid var(--border)" }}
             >
-              <p className="text-xs font-bold" style={{ color: "var(--text)" }}>
-                アピール設定 <span className="font-normal" style={{ color: "var(--muted)" }}>（任意）</span>
-              </p>
-
               {/* ターゲット */}
               <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>ターゲット層</label>
+                <label className="block text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>ターゲット層（任意）</label>
                 <input
                   type="text"
                   value={target}
@@ -514,47 +515,98 @@ export default function GeneratePage() {
                 />
               </div>
 
-              {/* パターン別訴求方向性 */}
+              {/* スロット設定 */}
               <div>
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>
-                    パターン別の訴求方向性
+                    投稿スロット（4枠）
                   </label>
                   <button
-                    onClick={() => setAppealAngles(randomAngles())}
+                    type="button"
+                    onClick={() => setSlots(randomSlots())}
                     className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
                     style={{ background: "var(--accent-light)", color: "var(--accent)" }}
                   >
                     <Shuffle className="w-3 h-3" />
-                    シャッフル
+                    全てシャッフル
                   </button>
                 </div>
-                <div className="space-y-1.5">
-                  {ORDERED_PATTERNS.map((pattern, i) => (
-                    <div key={pattern} className="flex items-center gap-2">
-                      <span
-                        className="text-xs font-bold px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap"
-                        style={{ background: "var(--accent-light)", color: "var(--accent)", fontSize: "10px" }}
-                      >
-                        {PATTERN_ICONS[pattern]} {pattern}
-                      </span>
-                      <input
-                        type="text"
-                        value={appealAngles[i] ?? ""}
-                        onChange={e => {
-                          const next = [...appealAngles]
-                          next[i] = e.target.value
-                          setAppealAngles(next)
-                        }}
-                        placeholder={PATTERN_ANGLE_POOLS[pattern][0]}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg border text-xs outline-none"
-                        style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                      />
+
+                <div className="space-y-2">
+                  {slots.map((slot, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg p-2.5 space-y-1.5"
+                      style={{ background: "var(--bg)", border: "1px solid var(--border)" }}
+                    >
+                      {/* スロットヘッダー */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold" style={{ color: "var(--accent)" }}>
+                          スロット {i + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = [...slots]
+                            next[i] = randomSlot(slot.pattern)
+                            setSlots(next)
+                          }}
+                          className="text-xs px-1.5 py-0.5 rounded transition-opacity hover:opacity-70"
+                          style={{ background: "var(--accent-light)", color: "var(--accent)" }}
+                        >
+                          <Shuffle className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      {/* 大分類（パターン）プルダウン */}
+                      <div>
+                        <label className="block text-xs mb-0.5" style={{ color: "var(--muted)", fontSize: "10px" }}>
+                          大分類（パターン）
+                        </label>
+                        <select
+                          value={slot.pattern}
+                          onChange={e => {
+                            const pattern = e.target.value as PatternName
+                            const next = [...slots]
+                            next[i] = { pattern, angle: PATTERN_ANGLE_POOLS[pattern][0] }
+                            setSlots(next)
+                          }}
+                          className="w-full px-2 py-1.5 rounded-lg border text-xs outline-none"
+                          style={{ borderColor: "var(--border)", background: "var(--card)", color: "var(--text)" }}
+                        >
+                          {ALL_PATTERNS.map(p => (
+                            <option key={p} value={p}>
+                              {PATTERN_ICONS[p]} {p}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 中分類（訴求角度）プルダウン */}
+                      <div>
+                        <label className="block text-xs mb-0.5" style={{ color: "var(--muted)", fontSize: "10px" }}>
+                          中分類（訴求角度）
+                        </label>
+                        <select
+                          value={slot.angle}
+                          onChange={e => {
+                            const next = [...slots]
+                            next[i] = { ...next[i], angle: e.target.value }
+                            setSlots(next)
+                          }}
+                          className="w-full px-2 py-1.5 rounded-lg border text-xs outline-none"
+                          style={{ borderColor: "var(--border)", background: "var(--card)", color: "var(--text)" }}
+                        >
+                          {PATTERN_ANGLE_POOLS[slot.pattern].map(a => (
+                            <option key={a} value={a}>{a}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   ))}
                 </div>
                 <p className="text-xs mt-1.5" style={{ color: "var(--muted)" }}>
-                  空欄のスロットは自動でランダム選択されます
+                  同じパターンを複数スロットに設定できます
                 </p>
               </div>
             </div>
@@ -657,7 +709,7 @@ export default function GeneratePage() {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "var(--accent-light)", color: "var(--accent)" }}>
-                            {PATTERN_ICONS[post.patternName]} {post.patternName}
+                            {PATTERN_ICONS[post.patternName as PatternName] ?? ""} {post.patternName}
                           </span>
                           <span className="text-xs" style={{ color: "var(--muted)" }}>{post.angle}</span>
                         </div>

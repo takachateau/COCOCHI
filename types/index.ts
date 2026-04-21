@@ -25,11 +25,10 @@ export interface ProductInput {
   pdfText?: string
   target?: string
   /**
-   * パターン順のアピール角度（省略時はサーバー側でランダム選択）
-   * 順序: [エンタメ導入型, 手持ちUGC型, 直置きUGC型, 記事投稿型]
-   * 空文字のスロットはそのパターンのプールからランダム選択
+   * スロット設定（4枠）。各スロットに大分類（pattern）と中分類（angle）を指定。
+   * 省略時はサーバー側でデフォルト4パターン×ランダム角度を使用。
    */
-  appealAngles?: string[]
+  slots?: { pattern: string; angle: string }[]
   productImageBase64: string
   productImageMime: string
 }
