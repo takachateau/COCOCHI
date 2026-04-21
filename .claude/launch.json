@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "cocochi-dev",
-      "runtimeExecutable": "sleep",
-      "runtimeArgs": ["infinity"],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3000"],
+      "cwd": "/Users/takaakikanasashi/my-company/project_COCOCHI/development/cocochi",
       "port": 3000
     }
   ]
