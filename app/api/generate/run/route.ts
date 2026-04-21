@@ -10,7 +10,7 @@ import { generateUGCCover, generateContentSlide, generateEntertainmentSlide } fr
 import { detectMood, selectPostFolder, mapSlidesToRefs, uploadRefMapping, selectEntertainmentStyle, readCaption } from "@/lib/reference"
 import type { UploadedRefMapping } from "@/lib/reference"
 import { saveGroup } from "@/lib/storage"
-import { updateJob } from "@/lib/jobs"
+import { getJob, updateJob } from "@/lib/jobs"
 import type { ProductInput, Post, PostGroup, CostSummary } from "@/types"
 import { PATTERN_NAMES, PATTERN_ANGLE_POOLS } from "../route"
 
@@ -73,6 +73,10 @@ async function processJob(jobId: string, body: ProductInput) {
   const { productName, ingredients, howToUse, price, appealPoints, forbiddenWords, pdfText, target, appealAngles, productImageBase64, productImageMime } = body
 
   try {
+    // このlambdaインスタンスはジョブを知らないのでBlobからロードしてメモリに載せる
+    // これをしないと updateJob が jobs.get(id) === undefined でサイレントに失敗する
+    await getJob(jobId)
+
     updateJob(jobId, { status: "generating", progress: "Claudeがコンテンツを考えています...", startTime: Date.now() })
 
     const patternAngles = PATTERN_NAMES.map((pattern, i) => {
