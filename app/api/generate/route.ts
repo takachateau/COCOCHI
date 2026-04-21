@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse, after } from "next/server"
-import { createJob, updateJob, pruneOldJobs } from "@/lib/jobs"
+import { NextRequest, NextResponse } from "next/server"
+import { createJob, pruneOldJobs } from "@/lib/jobs"
 import type { ProductInput } from "@/types"
 
 export const runtime = "nodejs"
-export const maxDuration = 300
+export const maxDuration = 30
 
 // ─── パターン別アピール角度プール ──────────────────────────────────
 export const PATTERN_NAMES = ["エンタメ導入型", "手持ちUGC型", "直置きUGC型", "記事投稿型"] as const
@@ -26,29 +26,8 @@ export async function POST(req: NextRequest) {
   }
 
   pruneOldJobs()
-
   const job = createJob()
 
-  // after() で独立したサーバーレス関数 /api/generate/run を呼び出す。
-  // 同一プロセス内でのバックグラウンド処理ではなく、新しい HTTP リクエストとして
-  // Vercel が別インスタンスを立ち上げるため、maxDuration=300 が有効になる。
-  after(async () => {
-    try {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL
-        ? process.env.NEXT_PUBLIC_APP_URL
-        : process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : "http://localhost:3000"
-      await fetch(`${baseUrl}/api/generate/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id, body }),
-      })
-    } catch (err) {
-      console.error("[generate] run fetch失敗:", err)
-      updateJob(job.id, { status: "error", error: String(err) })
-    }
-  })
-
-  return NextResponse.json({ jobId: job.id })
+  // jobId と body を返す。クライアントが /api/generate/run を fire-and-forget で呼ぶ。
+  return NextResponse.json({ jobId: job.id, body })
 }

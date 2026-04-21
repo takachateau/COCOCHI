@@ -251,6 +251,7 @@ export default function GeneratePage() {
         productImageMime: imageMime,
       }
 
+      // 1. ジョブIDを取得（バリデーション込み）
       const startRes = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -259,6 +260,15 @@ export default function GeneratePage() {
       const startData = await startRes.json()
       if (!startRes.ok || startData.error) throw new Error(startData.error ?? "開始エラー")
       const { jobId } = startData as { jobId: string }
+
+      // 2. 画像生成を開始（fire-and-forget）
+      // /api/generate/run はレスポンスを返すまで Vercel が関数を維持し続けるため、
+      // クライアントが接続を切っても maxDuration=300 の範囲で処理が継続される
+      fetch("/api/generate/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, body }),
+      }).catch(() => { /* エラーはステータスポーリングで検知 */ })
 
       await new Promise<void>((resolve, reject) => {
         const poll = setInterval(async () => {

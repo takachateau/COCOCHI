@@ -1,7 +1,8 @@
 /**
  * /api/generate/run
- * after() から fetch で呼ばれる独立したサーバーレス関数。
- * processJob を直接 await して、Vercel の 300 秒タイムアウト内で画像生成を完走させる。
+ * クライアントから fire-and-forget で呼ばれる長時間実行エンドポイント。
+ * processJob を直接 await することでサーバーレス関数のライフタイム中に処理を完走させる。
+ * クライアントはレスポンスを待たず、/api/generate/status/[jobId] でポーリングする。
  */
 import { NextRequest, NextResponse } from "next/server"
 import { generateArticle, qcScore, generateCaption } from "@/lib/claude"
@@ -61,17 +62,11 @@ const HOOK_THEMES = [
 export async function POST(req: NextRequest) {
   const { jobId, body } = await req.json() as { jobId: string; body: ProductInput }
 
-  // 即座に 200 を返す（呼び出し元の after() が完了を待つ必要はない）
-  // ただし Vercel はレスポンス後もこの関数を生かし続けるため、processJob を await する
-  const responsePromise = processJob(jobId, body)
+  // processJob を await することでこのサーバーレス関数が生き続ける（maxDuration=300）
+  // クライアントが接続を切っても Vercel はレスポンスを返すまで関数を維持する
+  await processJob(jobId, body)
 
-  // レスポンスを先に返して接続を切る
-  const res = NextResponse.json({ ok: true })
-
-  // processJob は引き続き実行される（このサーバーレス関数のライフタイムとして）
-  await responsePromise
-
-  return res
+  return NextResponse.json({ ok: true })
 }
 
 async function processJob(jobId: string, body: ProductInput) {
