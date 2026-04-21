@@ -1,3 +1,13 @@
+/**
+ * ジョブ管理
+ * - メモリキャッシュ（同一インスタンス内の高速アクセス用）
+ * - Vercel Blob（インスタンス間の共有・永続化）
+ *
+ * Vercelはリクエストごとに別インスタンスで動くため、
+ * ジョブ状態をBlobに保存してどのインスタンスからも読めるようにする。
+ */
+
+import { put, list } from "@vercel/blob"
 import type { PostGroup } from "@/types"
 
 export type JobStatus = "pending" | "generating" | "done" | "error"
@@ -11,12 +21,31 @@ export interface Job {
   group?: PostGroup
   error?: string
   createdAt: number
-  startTime?: number   // generating 状態に入った時刻 (ms)
+  startTime?: number
 }
+
+// ─── メモリキャッシュ（同一インスタンス内） ──────────────────────
 
 const g = globalThis as typeof globalThis & { __cocochi_jobs?: Map<string, Job> }
 if (!g.__cocochi_jobs) g.__cocochi_jobs = new Map<string, Job>()
 const jobs = g.__cocochi_jobs
+
+// ─── Blob 永続化 ─────────────────────────────────────────────────
+
+function jobBlobPath(id: string) {
+  return `cocochi/jobs/${id}.json`
+}
+
+function persistJob(job: Job): void {
+  // fire-and-forget（エラーは無視）
+  put(jobBlobPath(job.id), JSON.stringify(job), {
+    access: "public",
+    contentType: "application/json",
+    allowOverwrite: true,
+  }).catch(e => console.warn("[jobs] Blob保存失敗:", e))
+}
+
+// ─── 公開API ─────────────────────────────────────────────────────
 
 export function createJob(): Job {
   const job: Job = {
@@ -28,20 +57,39 @@ export function createJob(): Job {
     createdAt: Date.now(),
   }
   jobs.set(job.id, job)
+  persistJob(job)
   return job
 }
 
-export function getJob(id: string): Job | undefined {
-  return jobs.get(id)
+export async function getJob(id: string): Promise<Job | undefined> {
+  // まずメモリキャッシュを確認
+  const cached = jobs.get(id)
+  if (cached) return cached
+
+  // なければBlobから取得
+  try {
+    const { blobs } = await list({ prefix: jobBlobPath(id) })
+    const blob = blobs.find(b => b.pathname === jobBlobPath(id))
+    if (!blob) return undefined
+    const res = await fetch(blob.url, { cache: "no-store" })
+    if (!res.ok) return undefined
+    const job = await res.json() as Job
+    jobs.set(id, job)
+    return job
+  } catch {
+    return undefined
+  }
 }
 
-export function updateJob(id: string, patch: Partial<Job>) {
+export function updateJob(id: string, patch: Partial<Job>): void {
   const job = jobs.get(id)
   if (!job) return
-  jobs.set(id, { ...job, ...patch })
+  const updated = { ...job, ...patch }
+  jobs.set(id, updated)
+  persistJob(updated)
 }
 
-export function pruneOldJobs() {
+export function pruneOldJobs(): void {
   const cutoff = Date.now() - 60 * 60 * 1000
   for (const [id, job] of jobs) {
     if (job.createdAt < cutoff) jobs.delete(id)
