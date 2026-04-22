@@ -19,6 +19,9 @@ fal.config({ credentials: process.env.FAL_KEY! })
 
 const NO_UI = "no watermark, no repost icon, no social media UI, no share button, no app interface overlay, no Instagram UI, no TikTok UI, clean image only, no people, no face, no full body, no human figure, close-up of hands holding product or applying to skin is acceptable but no portraits, no other products, no additional products in background, no competing products, only the single specified product"
 
+// スマホ素撮り感 — 全パターン共通で末尾に付与
+const SMARTPHONE_FEEL = "shot on iPhone, casual smartphone snapshot, slightly flat mobile camera quality, minor JPEG compression, everyday amateur photo feel, not professional photography, no studio lighting, candid and unedited look"
+
 const COLOR_TONES: Record<string, string> = {
   pink:   "soft pink and white feminine pastel",
   blue:   "clean light blue and white fresh minimal",
@@ -139,7 +142,7 @@ export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> 
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_${Date.now()}.jpg`)
 
   if (patternName === "記事投稿型") {
-    const prompt = `Japanese beauty lifestyle Instagram cover. Aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible.${styleNote} Large bold Japanese title: "${headline}", small tag: "${tag}". ${tone} colors. Portrait orientation. ${NO_UI}`
+    const prompt = `Japanese beauty lifestyle Instagram cover. Aesthetic background scene — morning vanity, botanical shelf, soft window light. No product visible.${styleNote} Large bold Japanese title: "${headline}", small tag: "${tag}". ${tone} colors. Portrait orientation. ${SMARTPHONE_FEEL}. ${NO_UI}`
     return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
   }
 
@@ -148,11 +151,11 @@ export async function generateUGCCover(params: UGCCoverParams): Promise<Buffer> 
     const handStyleNote = styleDescription
       ? `Style reference from second image — replicate exactly: background color palette, lighting quality, color grading, overall mood and atmosphere.`
       : ""
-    prompt = `${handStyleNote} Authentic Japanese UGC-style Instagram photo. A Japanese woman's hand holding the exact product from the first image in her open palm or fingers. Natural skin tone, manicured nails. Close-up of hand and product, no face, no full body. Warm soft lighting, personal beauty routine atmosphere. ${tone} tones. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `${handStyleNote} Authentic Japanese UGC-style Instagram photo. A Japanese woman's hand holding the exact product from the first image in her open palm or fingers. Natural skin tone, manicured nails. Close-up of hand and product, no face, no full body. Warm soft lighting, personal beauty routine atmosphere. ${tone} tones. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${SMARTPHONE_FEEL}. ${NO_UI}`
   } else if (patternName === "直置きUGC型") {
-    prompt = `Authentic Japanese UGC-style Instagram photo. The exact product from the first image, placed on a surface — desk, shelf, or bathroom counter. No hands.${styleNote} Amateur casual photography feel, genuine user-generated content. ${tone} tones, natural soft lighting. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram photo. The exact product from the first image, placed on a surface — desk, shelf, or bathroom counter. No hands.${styleNote} Amateur casual photography feel, genuine user-generated content. ${tone} tones, natural soft lighting. Large bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${SMARTPHONE_FEEL}. ${NO_UI}`
   } else {
-    prompt = `Japanese beauty Instagram photo. The exact product from the first image in the scene naturally.${styleNote} ${tone} colors, soft natural lighting. Large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${NO_UI}`
+    prompt = `Japanese beauty Instagram photo. The exact product from the first image in the scene naturally.${styleNote} ${tone} colors, soft natural lighting. Large elegant bold Japanese text: "${headline}", small tag: "${tag}". Portrait orientation. ${SMARTPHONE_FEEL}. ${NO_UI}`
   }
 
   if (instruction) prompt += ` ${instruction}`
@@ -238,13 +241,13 @@ export async function generateEntertainmentSlide(params: EntertainmentSlideParam
 
   if (slideNumber === 4) {
     // 商品が自然に登場するシーン（「出会ったのが〇〇」）
-    prompt = `Authentic Japanese UGC-style Instagram. A Japanese woman naturally holding or using the skincare product from the first reference image in her daily routine. Casual, genuine, lifestyle moment. The product is visible but feels incidental, not staged.${styleNote} ${tone} aesthetic, warm soft lighting. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullets: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}${price ? `. Product name "${productName}" and price "${price}" as bold text.` : ""}. Portrait orientation. ${NO_UI}`
+    prompt = `Authentic Japanese UGC-style Instagram. A Japanese woman naturally holding or using the skincare product from the first reference image in her daily routine. Casual, genuine, lifestyle moment. The product is visible but feels incidental, not staged.${styleNote} ${tone} aesthetic, warm soft lighting. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullets: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}${price ? `. Product name "${productName}" and price "${price}" as bold text.` : ""}. Portrait orientation. ${SMARTPHONE_FEEL}. ${NO_UI}`
     if (instruction) prompt += ` ${instruction}`
     return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
   }
 
   // Slide 5: 商品クローズアップ + CTA
-  prompt = `Authentic Japanese UGC-style Instagram. The skincare product from the reference image as the hero, prominently displayed on a clean aesthetic surface or held in hand.${styleNote} ${tone} aesthetic, beautiful product photography, lifestyle feel. Large bold Japanese CTA text: "${headline}", tag: "${tag}"${bulletText ? `, bullets: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}. "保存してね" feel, call-to-action energy. Portrait orientation. ${NO_UI}`
+  prompt = `Authentic Japanese UGC-style Instagram. The skincare product from the reference image as the hero, prominently displayed on a clean aesthetic surface or held in hand.${styleNote} ${tone} aesthetic, beautiful product photography, lifestyle feel. Large bold Japanese CTA text: "${headline}", tag: "${tag}"${bulletText ? `, bullets: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}. "保存してね" feel, call-to-action energy. Portrait orientation. ${SMARTPHONE_FEEL}. ${NO_UI}`
   if (instruction) prompt += ` ${instruction}`
   return generateImage(prompt, refImageUrl ? [productUrl, refImageUrl] : [productUrl])
 }
