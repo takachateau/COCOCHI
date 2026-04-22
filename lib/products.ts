@@ -15,7 +15,7 @@ async function loadProductsFromBlob(): Promise<Product[]> {
     const { blobs } = await list({ prefix: PRODUCTS_BLOB_PATH })
     const blob = blobs.find(b => b.pathname === PRODUCTS_BLOB_PATH)
     if (!blob) return []
-    const res = await fetch(blob.url, { cache: "no-store" })
+    const res = await fetch(`${blob.url}?t=${Date.now()}`, { cache: "no-store" })
     if (!res.ok) return []
     const raw = await res.json() as (Product & { efficacy?: string })[]
     // backward compat: efficacy → ingredients
@@ -101,10 +101,10 @@ export async function updateProduct(id: string, params: {
   if (params.imageBase64 && params.imageMime) {
     const ext = (params.imageMime || "image/jpeg").split("/")[1] || "jpg"
     const buf = Buffer.from(params.imageBase64, "base64")
-    const blob = await put(`cocochi/products/${id}.${ext}`, buf, {
+    // タイムスタンプ付きファイル名で新規アップロード → CDNキャッシュをバイパス
+    const blob = await put(`cocochi/products/${id}_${Date.now()}.${ext}`, buf, {
       access: "public",
       contentType: params.imageMime,
-      allowOverwrite: true,
     })
     imageUrl = blob.url
     imageMime = params.imageMime
