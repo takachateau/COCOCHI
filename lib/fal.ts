@@ -262,6 +262,16 @@ export async function generateContentSlide(params: ContentSlideParams): Promise<
 
   const productUrl = await uploadBlob(Buffer.from(productImageBase64, "base64"), `product_s${slideNumber}_${Date.now()}.jpg`)
 
+  // before/after スライドの肌リアリティ制御
+  const allText = `${headline} ${tag} ${bulletText} ${accentText}`.toLowerCase()
+  const isBeforeSlide = /before|ビフォー|使う前|使用前|悩み|問題|コンプレックス/.test(allText)
+  const isAfterSlide  = /after|アフター|使用後|使った後|変化|改善|結果|効果/.test(allText)
+  const skinNote = isBeforeSlide
+    ? " Skin shows mild realistic concerns — slightly uneven tone, minor texture, subtle redness. NOT extreme or exaggerated. Believable everyday skin imperfection."
+    : isAfterSlide
+    ? " Skin looks naturally improved — healthy glow, smoother texture, more even tone. NOT perfect or flawless. Realistic believable improvement, not dramatic transformation."
+    : ""
+
   let prompt: string
   if (patternName === "直置きUGC型") {
     prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image, placed on a surface (no hands).${styleNote} Amateur casual photography feel. ${tone} aesthetic, natural soft lighting. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
@@ -269,9 +279,10 @@ export async function generateContentSlide(params: ContentSlideParams): Promise<
     const handStyleNote = styleDescription
       ? `Style reference from second image — replicate exactly: background color palette, lighting quality, color grading, overall mood and atmosphere.`
       : ""
-    prompt = `${handStyleNote} Authentic Japanese UGC-style Instagram carousel slide. A Japanese woman's hand holding or applying the exact product from the first image. Natural skin tone, manicured nails. Close-up of hand and product, no face, no full body. Warm soft lighting, personal beauty routine atmosphere. ${tone} aesthetic. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    prompt = `${handStyleNote} Authentic Japanese UGC-style Instagram carousel slide. A Japanese woman's hand holding or applying the exact product from the first image. Natural skin tone, manicured nails. Close-up of hand and product, no face, no full body. Warm soft lighting, personal beauty routine atmosphere.${skinNote} ${tone} aesthetic. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   } else {
-    prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image in the scene naturally.${styleNote} Amateur casual photography feel. ${tone} aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
+    // 記事投稿型 など
+    prompt = `Authentic Japanese UGC-style Instagram carousel slide. The exact product from the first image in the scene naturally.${styleNote}${skinNote} Amateur casual photography feel. ${tone} aesthetic, beauty lifestyle photography. Large bold Japanese headline: "${headline}", tag: "${tag}"${bulletText ? `, bullet points: "${bulletText}"` : ""}${accentText ? `, accent: "${accentText}"` : ""}.${slide2Text} Portrait orientation. ${NO_UI}`
   }
 
   if (instruction) prompt += ` ${instruction}`
