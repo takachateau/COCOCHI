@@ -15,7 +15,8 @@ async function loadGroupsFromBlob(): Promise<PostGroup[]> {
     const { blobs } = await list({ prefix: GROUPS_BLOB_PATH })
     const blob = blobs.find(b => b.pathname === GROUPS_BLOB_PATH)
     if (!blob) return []
-    const res = await fetch(blob.url, { cache: "no-store" })
+    // ?t= でVercel BlobのCDNキャッシュをバイパス（saveGroup直後の読み取りで古い内容が返るのを防ぐ）
+    const res = await fetch(`${blob.url}?t=${Date.now()}`, { cache: "no-store" })
     if (!res.ok) return []
     return await res.json() as PostGroup[]
   } catch {
@@ -90,6 +91,14 @@ export async function saveGroup(group: PostGroup): Promise<PostGroup> {
   await saveGroupsToBlob(groups)
 
   return saved
+}
+
+export async function toggleGroupVisibility(id: string, hidden: boolean): Promise<void> {
+  const groups = await loadGroupsFromBlob()
+  const idx = groups.findIndex(g => g.id === id)
+  if (idx === -1) return
+  groups[idx] = { ...groups[idx], hidden }
+  await saveGroupsToBlob(groups)
 }
 
 export async function deleteGroup(id: string): Promise<void> {

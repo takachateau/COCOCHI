@@ -91,6 +91,7 @@ export interface PostGroup {
   productImageUrl?: string  // 永続Blob URL（再生成用）
   posts: Post[]             // 4パターン
   costSummary?: CostSummary
+  hidden?: boolean          // adminで非表示設定された場合true
 }
 
 export interface CostSummary {
