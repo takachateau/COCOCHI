@@ -1,5 +1,20 @@
 import sharp from "sharp"
 
+/**
+ * base64文字列の先頭マジックバイトから実際のMIMEタイプを検出する。
+ * ユーザーが申告したMIMEタイプは信頼しない（PNG画像をimage/jpegで送るケースがある）。
+ */
+export function detectImageMime(base64: string): "image/jpeg" | "image/png" | "image/webp" | "image/gif" {
+  // base64の先頭4〜8文字でフォーマットを判別
+  const prefix = base64.slice(0, 8)
+  if (prefix.startsWith("/9j/"))      return "image/jpeg"  // JPEG: FF D8 FF
+  if (prefix.startsWith("iVBORw"))   return "image/png"   // PNG: 89 50 4E 47
+  if (prefix.startsWith("UklGR"))    return "image/webp"  // WebP: RIFF....WEBP
+  if (prefix.startsWith("R0lGO"))    return "image/gif"   // GIF: 47 49 46 38
+  // 判別できない場合はJPEGにフォールバック
+  return "image/jpeg"
+}
+
 const OUTPUT_WIDTH = 1080
 const OUTPUT_HEIGHT = 1350  // 4:5 (Instagram推奨)
 
