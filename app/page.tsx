@@ -145,8 +145,13 @@ function SlideModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupId, postId: post.id, slideIndex }),
       })
-      const { jobId, error } = await res.json()
+      const { jobId, body, error } = await res.json()
       if (error) throw new Error(error)
+      fetch("/api/regenerate/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, body }),
+      }).catch(() => {})
       const updated = await pollJob(jobId, setRegenMsg)
       onRegenDone(updated)
     } catch (err) {
@@ -343,8 +348,14 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupId: group.id, instruction: instruction || undefined }),
       })
-      const { jobId, error } = await res.json()
+      const { jobId, body, error } = await res.json()
       if (error) throw new Error(error)
+      // fire-and-forget で run を呼ぶ（Vercelでバックグラウンド処理させる）
+      fetch("/api/regenerate/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, body }),
+      }).catch(() => {})
       const updated = await pollJob(jobId, setBulkMsg)
       onGroupUpdate(updated)
     } catch (err) {
@@ -370,8 +381,13 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupId: group.id, postId, slideIndex, instruction: instruction || undefined }),
       })
-      const { jobId, error } = await res.json()
+      const { jobId, body, error } = await res.json()
       if (error) throw new Error(error)
+      fetch("/api/regenerate/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, body }),
+      }).catch(() => {})
       const updated = await pollJob(jobId, setSlideMsg)
       onGroupUpdate(updated)
     } catch (err) {
