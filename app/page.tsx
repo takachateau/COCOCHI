@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePosts } from "@/context/posts"
-import { Plus, Download, Trash2, Sparkles, ChevronDown, ChevronUp, X, RefreshCw, Package, Info, Copy, Check, Settings } from "lucide-react"
+import { Plus, Download, Trash2, Sparkles, ChevronDown, ChevronUp, X, RefreshCw, Package, Info, Copy, Check } from "lucide-react"
 import type { Post, PostGroup, CostSummary } from "@/types"
 
 const PATTERN_ICONS: Record<string, string> = {
@@ -635,15 +635,7 @@ export default function Dashboard() {
             <span className="hidden sm:inline text-xs" style={{ color: "var(--muted)" }}>
               {groups.length} 商品 / {groups.reduce((sum, g) => sum + g.posts.length, 0)} 投稿
             </span>
-            <Link
-              href="/admin"
-              className="flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-bold transition-opacity hover:opacity-80"
-              style={{ background: "var(--card)", color: "var(--muted)", border: "1px solid var(--border)" }}
-            >
-              <Settings className="w-4 h-4" />
-              <span className="hidden sm:inline">管理</span>
-            </Link>
-            <Link
+<Link
               href="/products"
               className="flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-bold transition-opacity hover:opacity-80"
               style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}
