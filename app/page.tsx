@@ -93,6 +93,12 @@ async function downloadPost(post: Post, productName: string) {
   }
 }
 
+async function downloadAllPosts(posts: Post[], productName: string) {
+  for (const post of posts) {
+    await downloadPost(post, productName)
+  }
+}
+
 // ジョブのポーリング → 完了したら updatedGroup を返す
 async function pollJob(jobId: string, onProgress: (msg: string) => void): Promise<PostGroup> {
   return new Promise((resolve, reject) => {
@@ -463,6 +469,15 @@ function GroupRow({ group, index, onRemove, onGroupUpdate }: {
           {/* 原価 */}
           {group.costSummary && <CostBadge cost={group.costSummary} />}
 
+          {/* 全パターン一括DL */}
+          <button
+            onClick={() => downloadAllPosts(group.posts, group.productName)}
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-70 whitespace-nowrap flex-shrink-0"
+            style={{ color: "var(--muted)", background: "var(--border)" }}
+          >
+            <Download className="w-3 h-3" />
+            <span className="hidden sm:inline">全DL</span>
+          </button>
           {/* 一括再生成 */}
           <button
             onClick={handleBulkRegen}

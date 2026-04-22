@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk"
 import type { ArticleContent } from "@/types"
+import { detectImageMime } from "@/lib/image"
 
 function client() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -304,7 +305,7 @@ teal=清潔感・毛穴ケア, mono=シンプル・スタイリッシュ
             type: "image",
             source: {
               type: "base64",
-              media_type: params.productImageMime as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
+              media_type: detectImageMime(params.productImageBase64),
               data: params.productImageBase64,
             },
           },
@@ -373,7 +374,7 @@ ${slidesSummary}
 - 1行目は「もっと見る」の前に来るフック。思わずタップしたくなる1文
 - 実際の20〜30代女性UGCクリエイター風の口語体
 - 改行・空白行を活用して読みやすく
-- ハッシュタグは7〜10個、末尾にまとめる
+- ハッシュタグは5個以内、末尾にまとめる
 - 全体で150〜250字程度
 
 キャプション本文のみ返してください（説明・前置き不要）:`
@@ -401,7 +402,7 @@ export async function qcScore(imageBase64: string): Promise<{ score: number; com
       content: [
         {
           type: "image",
-          source: { type: "base64", media_type: "image/jpeg", data: imageBase64 },
+          source: { type: "base64", media_type: detectImageMime(imageBase64), data: imageBase64 },
         },
         {
           type: "text",
