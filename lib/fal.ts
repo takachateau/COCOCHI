@@ -145,11 +145,55 @@ async function uploadBlob(buf: Buffer, name: string, ct = "image/jpeg"): Promise
 
 /** FAL で画像を1枚生成して Buffer を返す（セマフォ + リトライ済み） */
 type FalResult = { images: { url: string }[] }
+type FalQueueStatus = { status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED"; error?: string }
 
 async function falFetch(url: string): Promise<Buffer> {
   const dl = await fetch(url)
   if (!dl.ok) throw new Error(`FAL: 画像DL失敗 ${dl.status}`)
   return Buffer.from(await dl.arrayBuffer())
+}
+
+/**
+ * FAL キューに投入して HTTP ポーリングで結果を取得する。
+ *
+ * fal.subscribe() は内部でWebSocketを使うため、Vercelサーバーレスで
+ * WebSocket接続が切れると "FAL側は完了済み・こちらは永遠に待機" 状態になる。
+ * queue.submit() + status ポーリング方式は純粋なHTTPで完結し、
+ * 接続断の影響を受けない。
+ *
+ * タイムアウト: 1枚あたり最大120秒（セマフォ5並列 × 2バッチ = 240s < Vercel 300s）
+ */
+async function falQueueGenerate(
+  modelId: string,
+  input: Record<string, unknown>,
+): Promise<FalResult> {
+  const POLL_INTERVAL_MS = 4_000   // 4秒ごとにステータス確認
+  const MAX_WAIT_MS      = 120_000 // 最大2分（スライド1枚あたり）
+
+  const submitted = await fal.queue.submit(modelId, { input })
+  const requestId = submitted.request_id
+  console.log(`[FAL] submitted ${modelId} → requestId=${requestId}`)
+
+  const deadline = Date.now() + MAX_WAIT_MS
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+    const status = await fal.queue.status(modelId, {
+      requestId,
+      logs: false,
+    }) as FalQueueStatus
+
+    console.log(`[FAL] ${requestId} status=${status.status} (${Math.floor((Date.now() - (deadline - MAX_WAIT_MS)) / 1000)}s)`)
+
+    if (status.status === "COMPLETED") {
+      const res = await fal.queue.result(modelId, { requestId })
+      return res.data as FalResult
+    }
+    if (status.status === "FAILED") {
+      throw new Error(`FAL queue FAILED: ${status.error ?? "unknown"} (requestId=${requestId})`)
+    }
+  }
+
+  throw new Error(`FAL poll timeout 120s: requestId=${requestId} — image may have been generated on FAL side`)
 }
 
 /**
@@ -166,67 +210,33 @@ async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffe
   await sem.acquire()
   try {
     return await withRetry(async () => {
+      let modelId: string
+      let input: Record<string, unknown>
+
       if (IMAGE_MODEL === "gpt-image-2") {
-        // ── GPT-Image-2 ────────────────────────────────────────────
-        // 縦型 3:4 ≒ 1024×1365 で出力。quality は medium でコスト抑制（約$0.06/枚）
         if (imageUrls.length > 0) {
-          console.log(`[FAL] gpt-image-2/edit, images: ${imageUrls.length}`)
-          const res = await fal.subscribe("openai/gpt-image-2/edit", {
-            input: {
-              prompt,
-              image_urls: imageUrls,
-              image_size: "portrait_4_3",  // 768×1024（3:4縦型）
-              quality: "medium",
-              output_format: "jpeg",
-            },
-          })
-          const url = (res.data as FalResult)?.images?.[0]?.url
-          if (!url) throw new Error("FAL: 画像URLが取得できません")
-          console.log(`[FAL] gpt-image-2 生成完了: ${url.slice(0, 60)}...`)
-          return falFetch(url)
+          modelId = "openai/gpt-image-2/edit"
+          input   = { prompt, image_urls: imageUrls, image_size: "portrait_4_3", quality: "medium", output_format: "jpeg" }
         } else {
-          console.log(`[FAL] gpt-image-2 (text only)`)
-          const res = await fal.subscribe("openai/gpt-image-2", {
-            input: {
-              prompt,
-              image_size: "portrait_4_3",
-              quality: "medium",
-              output_format: "jpeg",
-            },
-          })
-          const url = (res.data as FalResult)?.images?.[0]?.url
-          if (!url) throw new Error("FAL: 画像URLが取得できません")
-          console.log(`[FAL] gpt-image-2 生成完了: ${url.slice(0, 60)}...`)
-          return falFetch(url)
+          modelId = "openai/gpt-image-2"
+          input   = { prompt, image_size: "portrait_4_3", quality: "medium", output_format: "jpeg" }
         }
       } else {
-        // ── Nano Banana（旧モデル・フォールバック） ─────────────────
         if (imageUrls.length > 0) {
-          console.log(`[FAL] nano-banana-pro/edit, images: ${imageUrls.length}`)
-          const res = await fal.subscribe("fal-ai/nano-banana-pro/edit", {
-            input: {
-              prompt,
-              image_urls: imageUrls,
-              aspect_ratio: "3:4",
-              resolution: "1K",
-              output_format: "jpeg",
-            },
-          })
-          const url = (res.data as FalResult)?.images?.[0]?.url
-          if (!url) throw new Error("FAL: 画像URLが取得できません")
-          console.log(`[FAL] nano-banana 生成完了: ${url.slice(0, 60)}...`)
-          return falFetch(url)
+          modelId = "fal-ai/nano-banana-pro/edit"
+          input   = { prompt, image_urls: imageUrls, aspect_ratio: "3:4", resolution: "1K", output_format: "jpeg" }
         } else {
-          console.log(`[FAL] nano-banana-2 (text only)`)
-          const res = await fal.subscribe("fal-ai/nano-banana-2", {
-            input: { prompt, aspect_ratio: "3:4", resolution: "1K", output_format: "jpeg" },
-          })
-          const url = (res.data as FalResult)?.images?.[0]?.url
-          if (!url) throw new Error("FAL: 画像URLが取得できません")
-          console.log(`[FAL] nano-banana 生成完了: ${url.slice(0, 60)}...`)
-          return falFetch(url)
+          modelId = "fal-ai/nano-banana-2"
+          input   = { prompt, aspect_ratio: "3:4", resolution: "1K", output_format: "jpeg" }
         }
       }
+
+      console.log(`[FAL] generateImage ${modelId}, images: ${imageUrls.length}`)
+      const data = await falQueueGenerate(modelId, input)
+      const url  = data?.images?.[0]?.url
+      if (!url) throw new Error("FAL: 画像URLが取得できません")
+      console.log(`[FAL] 生成完了: ${url.slice(0, 60)}...`)
+      return falFetch(url)
     })
   } finally {
     sem.release()
