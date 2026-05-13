@@ -513,6 +513,7 @@ export async function dbSaveGeneratedPost(post: {
   compositionType?: CompositionType | null
   refBenchmark?: string | null
   imageUrls: string[]
+  imageCost?: { jpy: string; cny: string; usd: string } | null
 }): Promise<GeneratedPost> {
   const { data, error } = await supabase
     .from("generated_posts")
@@ -533,6 +534,14 @@ export async function dbSaveGeneratedPost(post: {
     .single()
 
   if (error) throw new Error(`GeneratedPost save error: ${error.message}`)
+
+  // image_cost は別途 UPDATE（カラムが未追加の環境でも安全に動作させるため）
+  if (post.imageCost && data?.id) {
+    void supabase
+      .from("generated_posts")
+      .update({ image_cost: post.imageCost })
+      .eq("id", data.id as string)
+  }
 
   // ペルソナ名を別途取得
   let personaName: string | undefined
@@ -700,6 +709,7 @@ function rowToGeneratedPost(row: Record<string, unknown>, personaName?: string):
     compositionType: (row.composition_type as CompositionType | null) ?? null,
     refBenchmark:    (row.ref_benchmark as string | null) ?? null,
     imageUrls:       (row.image_urls as string[]) ?? [],
+    imageCost:       (row.image_cost as { jpy: string; cny: string; usd: string } | null) ?? undefined,
   }
 }
 

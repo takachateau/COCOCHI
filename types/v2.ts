@@ -194,6 +194,7 @@ export interface GeneratedPost {
   compositionType: CompositionType | null
   refBenchmark: string | null
   imageUrls: string[]
+  imageCost?: { jpy: string; cny: string; usd: string }
 }
 
 // ─── v4: 生成キュー ──────────────────────────────────────────────

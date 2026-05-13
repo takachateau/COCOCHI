@@ -184,15 +184,10 @@ async function processSlideRegen(
 
     const [imageUrl] = await uploadSlideBuffers([result.buffer])
 
-    await dbUpdateJob(jobId, {
-      status:       "done",
-      imageUrls:    [imageUrl],
-      refBenchmark: refBenchmark.folderPath,
-    })
-
-    // generated_posts の該当スライド URL を更新（job_ でない UUID のみ）
+    // generated_posts の該当スライド URL を先に更新する（競合状態を防ぐため）
+    // ※ status="done" を先に書くとクライアントのポーリングが先に拾ってしまい、
+    //   DB更新前に loadResults() が走って古い画像が表示される
     if (p.generatedPostId && !p.generatedPostId.startsWith("job_")) {
-      // 現在の imageUrls を取得して該当インデックスだけ差し替え
       const { createClient } = await import("@supabase/supabase-js")
       const sb = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -209,6 +204,13 @@ async function processSlideRegen(
         await dbUpdateGeneratedPostImages(p.generatedPostId, urls)
       }
     }
+
+    // generated_posts 更新が完了してからステータスを done にする
+    await dbUpdateJob(jobId, {
+      status:       "done",
+      imageUrls:    [imageUrl],
+      refBenchmark: refBenchmark.folderPath,
+    })
 
     console.log(`[v4/process] slide_regen job ${jobId} done. slideIndex=${p.slideIndex}`)
     return NextResponse.json({ ok: true })
@@ -515,6 +517,7 @@ export async function POST(
       compositionType: types.compositionType,
       refBenchmark:    selectedBenchmark!.folderPath,
       imageUrls:       imageUrls.filter((u): u is string => u !== null),
+      imageCost,
     }).catch(err => console.warn("[v4/process] generated_posts 保存失敗（続行）:", err))
 
     console.log(`[v4/process] job ${jobId} done. slides=${slides.length} failed=${failedSlides.length}`)

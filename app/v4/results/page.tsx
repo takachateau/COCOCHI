@@ -382,6 +382,11 @@ export default function ResultsPage() {
                     <Clock className="w-3.5 h-3.5" />
                     {new Date(result.createdAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </div>
+                  {result.imageCost && (
+                    <span className="text-[11px] font-medium flex-shrink-0" style={{ color: "var(--accent)" }}>
+                      💴 {result.imageCost.jpy} / {result.imageCost.usd}
+                    </span>
+                  )}
                   {viewMode === "active" ? (
                     <button onClick={() => handleDelete(result.id)} title={r_.moveToTrash}
                       className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-opacity hover:opacity-80"
