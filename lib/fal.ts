@@ -517,6 +517,7 @@ export interface V2SlideParams {
   }
   slideNumber?: number         // スライド番号（01など）
   instruction?: string         // ユーザー追加指示（再生成時の修正内容など）
+  bgInherit?: boolean          // true = 同背景グループ継承モード（背景をそのままコピー）
 }
 
 /**
@@ -536,6 +537,7 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     headline, tag, bullets, accent, colorPalette,
     productImageBase64, productImageUrl, refImageUrl,
     styleDescription, personaHint, visualProfile, slideNumber,
+    bgInherit = false,
   } = params
 
   const hasProduct = !!productImageUrl || (productImageBase64?.length ?? 0) > 100
@@ -612,20 +614,26 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     + ` DO NOT reproduce any of the following from the reference: floating food icons or dishes, product thumbnail overlays, comparison panels, graphic stickers, rating bubbles, calorie labels, or any non-photographic composite elements.`
     + ` The generated image must look like a clean real photo — no floating graphics, no product thumbnails, no food items composited over the image.`,
 
-    // [3] 背景 — ベンチマークの屋内/屋外タイプを踏襲し、具体的な場所はスライドごとに変える
-    // 「屋外なら屋外」「カフェならカフェ」という大分類はstyleDescriptionから読み取って維持する
-    // 具体的な場所・物は毎スライド変えてバリエーションを出す
-    `Background setting type: READ the style description above to determine if the reference image is OUTDOOR, INDOOR, CAFE/SHOP, ROOFTOP, STREET, etc.`
-    + ` MATCH that setting type exactly — if the reference is outdoor, generate an outdoor scene; if cafe, generate a cafe; if indoor apartment, generate an indoor room. NEVER force all slides indoors.`
-    + (safeVisualProfile?.setting
-      ? ` Persona's typical settings for creative direction: "${safeVisualProfile.setting}". Use as inspiration within the matched setting type, not as an override.`
-      : "")
-    + (slideNumber !== undefined
-      ? ` Slide ${slideNumber} — choose a DIFFERENT specific sub-location than the reference: e.g. if reference shows a bedroom → use a living room or hallway; if reference is one street corner → use a different plaza or alley; if one cafe → different cafe style. Each slide must have a visually distinct background.`
-      : ` Use a DIFFERENT specific sub-location than the reference so each slide has a distinct background.`)
-    + ` DO NOT copy: same wall color, same objects, same furniture layout, same decor as the reference. Specific details must be completely new.`
-    + ` Lighting quality and time of day should match the reference's mood (bright natural daylight / warm evening glow / nighttime street light / etc.).`
-    + ` If reference is a plain white wall: add furniture, shelves, plants, or textured wall elements. Do NOT reproduce a blank plain wall.`,
+    // [3] 背景
+    // bgInherit=true (同背景グループの2枚目以降): 参照画像と同一背景を維持
+    // bgInherit=false (通常): ベンチマークの屋内/屋外タイプを踏襲しつつ具体的場所は変える
+    bgInherit
+      ? `Background: KEEP THE EXACT SAME background as the reference image — copy it with pixel-perfect precision.`
+        + ` The background must be IDENTICAL: same outdoor/indoor setting, same specific location (same street, same building, same room), same sky color and cloud pattern, same trees or foliage, same architecture, same surface textures, same ambient lighting direction, same color grading, same time of day, same atmosphere and mood.`
+        + ` This is a BACKGROUND INHERITANCE shot — the background must look like a continuation of the exact same moment and location.`
+        + ` ONLY update: the text overlay content, and adjust the person's outfit if the persona spec requires it. Nothing else changes.`
+        + ` FORBIDDEN: changing location type, adding new background objects, altering lighting color, shifting time of day, replacing the scene with a different place.`
+      : `Background setting type: READ the style description above to determine if the reference image is OUTDOOR, INDOOR, CAFE/SHOP, ROOFTOP, STREET, etc.`
+        + ` MATCH that setting type exactly — if the reference is outdoor, generate an outdoor scene; if cafe, generate a cafe; if indoor apartment, generate an indoor room. NEVER force all slides indoors.`
+        + (safeVisualProfile?.setting
+          ? ` Persona's typical settings for creative direction: "${safeVisualProfile.setting}". Use as inspiration within the matched setting type, not as an override.`
+          : "")
+        + (slideNumber !== undefined
+          ? ` Slide ${slideNumber} — choose a DIFFERENT specific sub-location than the reference: e.g. if reference shows a bedroom → use a living room or hallway; if reference is one street corner → use a different plaza or alley; if one cafe → different cafe style. Each slide must have a visually distinct background.`
+          : ` Use a DIFFERENT specific sub-location than the reference so each slide has a distinct background.`)
+        + ` DO NOT copy: same wall color, same objects, same furniture layout, same decor as the reference. Specific details must be completely new.`
+        + ` Lighting quality and time of day should match the reference's mood (bright natural daylight / warm evening glow / nighttime street light / etc.).`
+        + ` If reference is a plain white wall: add furniture, shelves, plants, or textured wall elements. Do NOT reproduce a blank plain wall.`,
 
     // [4] 人物 — visualProfile がある場合は固定の外見仕様を使う（ペルソナの再現性）
     //         ない場合は personaHint（旧ペルソナ向けフォールバック）

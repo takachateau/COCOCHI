@@ -323,6 +323,7 @@ export async function POST(req: NextRequest) {
         visualProfile,
         personaHint,
         productImageUrl:  slideProduct?.imageUrl,
+        bgInherit:        !!overrideRefImageUrl,  // 背景グループの2枚目以降は同背景継承モード
       })
       return { ...result, slideNumber: slide.slideNumber, index: i }
     }

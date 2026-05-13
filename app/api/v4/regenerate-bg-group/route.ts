@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
         visualProfile,
         personaHint,
         productImageUrl,
+        bgInherit:       groupRefImageUrl !== null,  // 2枚目以降は同背景継承モード
       })
       results.push(result)
 
