@@ -613,14 +613,36 @@ export default function TestGeneratePage() {
             )}
           </button>
 
-          {/* テキストのみ（同期・旧来通り） */}
+          {/* テキスト＋画像（同期・結果をこのページに表示） */}
+          <button
+            onClick={() => handleGenerate(true)}
+            disabled={generating || enqueuing}
+            className="px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-50 flex items-center gap-2"
+            style={{ background: "#0891b2" }}
+          >
+            {generating && phase === "image" ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                画像生成中…
+              </>
+            ) : generating && phase === "text" ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                テキスト生成中…
+              </>
+            ) : (
+              <><ImageIcon className="w-4 h-4" /> テキスト＋画像（即時）</>
+            )}
+          </button>
+
+          {/* テキストのみ（同期） */}
           <button
             onClick={() => handleGenerate(false)}
             disabled={generating || enqueuing}
             className="px-6 py-2.5 rounded-xl text-sm font-bold transition-opacity hover:opacity-85 disabled:opacity-50 flex items-center gap-2"
             style={{ background: "var(--accent-light)", color: "var(--accent)", border: "1px solid var(--accent)" }}
           >
-            {generating && phase === "text" ? (
+            {generating && phase === "text" && !imageResult ? (
               <>
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                 テキスト生成中…
@@ -789,29 +811,32 @@ export default function TestGeneratePage() {
                 )}
                 </div>{/* /relative */}
 
-                {/* ① 修正指示入力（再生成時に使用） */}
-                {imageResult?.imageUrls?.[i] && (
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={slideInstructions[i] ?? ""}
-                      onChange={e => setSlideInstructions(prev => ({ ...prev, [i]: e.target.value }))}
-                      onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleRegenerateSlide(i) }}
-                      placeholder="修正指示（例: 背景をカフェに）"
-                      disabled={regeneratingIndex !== null || generating}
-                      className="flex-1 px-2 py-1 rounded-lg border text-[10px] outline-none disabled:opacity-50"
-                      style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                    />
-                    <button
-                      onClick={() => handleRegenerateSlide(i)}
-                      disabled={regeneratingIndex !== null || generating}
-                      className="flex-shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-40"
-                      style={{ background: "var(--accent)" }}
-                    >
-                      <RefreshCw className={`w-3 h-3 ${regeneratingIndex === i ? "animate-spin" : ""}`} />
-                    </button>
-                  </div>
-                )}
+                {/* ① 修正指示入力（テキスト結果が出た時点から常に表示） */}
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={slideInstructions[i] ?? ""}
+                    onChange={e => setSlideInstructions(prev => ({ ...prev, [i]: e.target.value }))}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing && imageResult?.imageUrls?.[i]) {
+                        handleRegenerateSlide(i)
+                      }
+                    }}
+                    placeholder="修正指示（例: 背景をカフェに）"
+                    disabled={regeneratingIndex !== null || generating}
+                    className="flex-1 px-2 py-1 rounded-lg border text-[10px] outline-none disabled:opacity-50"
+                    style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                  />
+                  <button
+                    onClick={() => handleRegenerateSlide(i)}
+                    disabled={!imageResult?.imageUrls?.[i] || regeneratingIndex !== null || generating}
+                    title={imageResult?.imageUrls?.[i] ? "この画像を修正指示で再生成" : "先に画像を生成してください"}
+                    className="flex-shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-30"
+                    style={{ background: "var(--accent)" }}
+                  >
+                    <RefreshCw className={`w-3 h-3 ${regeneratingIndex === i ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
 
                 {/* ポリシー違反フォールバック通知（画像の外・下に表示） */}
                 {imageResult?.policyFallbackSlides?.includes(slide.slideNumber) && (

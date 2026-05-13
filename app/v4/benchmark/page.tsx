@@ -88,6 +88,8 @@ export default function BenchmarkPage() {
   const [bgGroupState, setBgGroupState] = useState<{ postId: string; slideUrls: string[]; groups: number[][] } | null>(null)
   const [bgGroupDetecting, setBgGroupDetecting] = useState<string | null>(null)
   const [bgGroupSaving, setBgGroupSaving] = useState(false)
+  const [bulkBgDetecting, setBulkBgDetecting] = useState(false)
+  const [bulkBgProgress, setBulkBgProgress] = useState<{ current: number; total: number } | null>(null)
 
   const BG_GROUP_COLORS = ["#f59e0b","#3b82f6","#10b981","#8b5cf6","#f43f5e","#0891b2"]
 
@@ -169,6 +171,11 @@ export default function BenchmarkPage() {
   }
 
   async function handleDetectBgGroups(post: BenchmarkPost) {
+    // 設定済みならAPIコールなしでモーダルを開く（確認・修正用）
+    if (post.backgroundGroups) {
+      setBgGroupState({ postId: post.id, slideUrls: post.slideUrls, groups: post.backgroundGroups })
+      return
+    }
     setBgGroupDetecting(post.id)
     try {
       const r = await fetch("/api/v4/benchmark/detect-bg-groups", {
@@ -184,6 +191,39 @@ export default function BenchmarkPage() {
     } finally {
       setBgGroupDetecting(null)
     }
+  }
+
+  // 全件一括BG検出（検出のみ自動保存、確認は後でBGボタンから）
+  async function handleBulkDetectBgGroups(accountPosts: BenchmarkPost[]) {
+    if (!confirm(`${accountPosts.length}件の投稿を一括でBG検出します。Claude Vision APIが各投稿に呼ばれます（数十秒かかります）。よろしいですか？`)) return
+    setBulkBgDetecting(true)
+    setBulkBgProgress({ current: 0, total: accountPosts.length })
+    let successCount = 0
+    for (let i = 0; i < accountPosts.length; i++) {
+      const post = accountPosts[i]
+      setBulkBgProgress({ current: i + 1, total: accountPosts.length })
+      try {
+        const r = await fetch("/api/v4/benchmark/detect-bg-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ benchmarkPostId: post.id }),
+        })
+        const d = await r.json() as { groups?: number[][]; error?: string }
+        if (d.error || !d.groups) continue
+        // 自動保存
+        await fetch("/api/v4/benchmark/save-bg-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ benchmarkPostId: post.id, groups: d.groups }),
+        })
+        // ローカル状態も更新
+        setPosts(prev => prev.map(p => p.id === post.id ? { ...p, backgroundGroups: d.groups! } : p))
+        successCount++
+      } catch { /* 1件失敗しても続行 */ }
+    }
+    setBulkBgDetecting(false)
+    setBulkBgProgress(null)
+    alert(`BG検出完了: ${successCount}/${accountPosts.length}件成功。各投稿の「✓BG」ボタンで確認・修正できます。`)
   }
 
   function cycleSlideGroup(slideIndex: number) {
@@ -901,13 +941,44 @@ export default function BenchmarkPage() {
                   スライドをクリックするとグループを変更できます。同じ色 = 同じ背景グループ
                 </p>
               </div>
-              <button
-                onClick={() => setBgGroupState(null)}
-                className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-70"
-                style={{ background: "var(--bg)", color: "var(--muted)" }}
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* 再検出ボタン（AIでやり直す） */}
+                <button
+                  onClick={async () => {
+                    const post = posts.find(p => p.id === bgGroupState?.postId)
+                    if (!post) return
+                    setBgGroupDetecting(post.id)
+                    try {
+                      const r = await fetch("/api/v4/benchmark/detect-bg-groups", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ benchmarkPostId: post.id }),
+                      })
+                      const d = await r.json() as { groups?: number[][]; error?: string }
+                      if (d.error) throw new Error(d.error)
+                      setBgGroupState(prev => prev ? { ...prev, groups: d.groups! } : null)
+                    } catch (e) {
+                      alert(e instanceof Error ? e.message : "再検出に失敗しました")
+                    } finally {
+                      setBgGroupDetecting(null)
+                    }
+                  }}
+                  disabled={bgGroupDetecting !== null}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-70 disabled:opacity-40"
+                  style={{ background: "var(--bg)", color: "var(--muted)", border: "1px solid var(--border)" }}
+                >
+                  {bgGroupDetecting !== null
+                    ? <><div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />再検出中...</>
+                    : <>🔄 AIで再検出</>}
+                </button>
+                <button
+                  onClick={() => setBgGroupState(null)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-70"
+                  style={{ background: "var(--bg)", color: "var(--muted)" }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* 凡例 */}
@@ -1040,8 +1111,8 @@ export default function BenchmarkPage() {
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent-light)", color: "var(--accent)" }}>
                   {grouped[selectedAccount].length}投稿
                 </span>
-                {/* 再分析 + 投稿追加ボタン */}
-                <div className="ml-auto flex gap-2">
+                {/* 再分析 + BG検出 + 投稿追加ボタン */}
+                <div className="ml-auto flex gap-2 flex-wrap justify-end">
                   {(() => {
                     const inc = grouped[selectedAccount].filter(p => !p.hookMain || !p.structureType || !p.compositionType).length
                     return inc > 0 ? (
@@ -1056,6 +1127,19 @@ export default function BenchmarkPage() {
                     {reanalyzing
                       ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />{reanalyzeProgress ? `${reanalyzeProgress.current}/${reanalyzeProgress.total}` : "..."}</>
                       : <>🔄 全件再分析</>}
+                  </button>
+                  {/* 全件BG一括検出 */}
+                  <button
+                    onClick={() => handleBulkDetectBgGroups(grouped[selectedAccount])}
+                    disabled={bulkBgDetecting || bgGroupDetecting !== null}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-50 flex items-center gap-1.5"
+                    style={{ background: "#0891b2" }}
+                    title="全投稿の同背景グループをまとめて検出・保存します"
+                  >
+                    {bulkBgDetecting
+                      ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          {bulkBgProgress ? `BG検出中 ${bulkBgProgress.current}/${bulkBgProgress.total}` : "BG検出中..."}</>
+                      : <>🔗 全件BG一括検出</>}
                   </button>
                   <button
                     onClick={() => {
