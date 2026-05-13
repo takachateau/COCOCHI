@@ -64,10 +64,27 @@ export default function TestGeneratePage() {
   const [textCost, setTextCost]   = useState<CostDisplay | null>(null)
   const [imageCost, setImageCost] = useState<CostDisplay | null>(null)
 
-  // ① per-slide instruction input
+  // per-slide instruction input
   const [slideInstructions, setSlideInstructions] = useState<Record<number, string>>({})
-  // ② background group bulk regen
+  // per-slide text edits (headline/tag/bullets/accent)
+  const [editedSlides, setEditedSlides] = useState<Record<number, { headline?: string; tag?: string; bullets?: string; accent?: string }>>({})
+  // background group bulk regen
   const [bulkRegenBgGroupLoading, setBulkRegenBgGroupLoading] = useState(false)
+
+  function getEffectiveSlide(i: number) {
+    const base = textResult!.generated.slides[i]
+    const edit = editedSlides[i]
+    if (!edit) return base
+    return {
+      ...base,
+      headline: edit.headline  ?? base.headline,
+      tag:      edit.tag       ?? base.tag,
+      bullets:  edit.bullets !== undefined
+        ? edit.bullets.split("\n").map(s => s.trim()).filter(Boolean)
+        : base.bullets,
+      accent:   edit.accent !== undefined ? edit.accent : base.accent,
+    }
+  }
 
   // 初期データ取得
   useEffect(() => {
@@ -122,6 +139,7 @@ export default function TestGeneratePage() {
     setTextCost(null)
     setImageCost(null)
     setSlideInstructions({})
+    setEditedSlides({})
 
     try {
       // ─── テキスト生成 ───
@@ -223,42 +241,47 @@ export default function TestGeneratePage() {
     }
   }
 
-  // 1スライドだけ再生成
+  // 1スライドだけ再生成（画像未生成でも動く・edited slide を優先使用）
   async function handleRegenerateSlide(slideIndex: number) {
-    if (!textResult || !imageResult) return
+    if (!textResult) return
     if (regeneratingIndex !== null) return
     setRegeneratingIndex(slideIndex)
     setError("")
     const instruction = slideInstructions[slideIndex]?.trim() || undefined
+    const effectiveSlide = getEffectiveSlide(slideIndex)
     try {
       const r = await fetch("/api/v4/regenerate-slide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          slide:                textResult.generated.slides[slideIndex],
+          slide:               effectiveSlide,
           personaId,
           postType,
-          productId:            (postType === "product" || postType === "mixed") ? productId : undefined,
-          types:                textResult.types,
+          productId:           (postType === "product" || postType === "mixed") ? productId : undefined,
+          types:               textResult.types,
           slideIndex,
-          benchmarkFolderPath:  imageResult.refBenchmark,
+          benchmarkFolderPath: imageResult?.refBenchmark || selectedBenchmarkPath || undefined,
           instruction,
         }),
       })
-      const d = await r.json() as { imageUrl?: string; policyFallback?: boolean; error?: string }
+      const d = await r.json() as { imageUrl?: string; policyFallback?: boolean; error?: string; refBenchmark?: string }
       if (d.error) throw new Error(d.error)
       if (!d.imageUrl) throw new Error("再生成失敗")
-      // 該当インデックスを差し替え + ポリシーフォールバック状態を更新
       setImageResult(prev => {
-        if (!prev) return prev
-        const updated = [...prev.imageUrls]
+        const slideNum = effectiveSlide.slideNumber
+        const base = prev ?? {
+          imageUrls: new Array(textResult!.generated.slides.length).fill(null) as (string | null)[],
+          refBenchmark: d.refBenchmark ?? "",
+          policyFallbackSlides: [],
+          failedSlides: [],
+          usedBgGroupMode: false,
+        }
+        const updated = [...base.imageUrls]
         updated[slideIndex] = d.imageUrl!
-        const slideNum = textResult!.generated.slides[slideIndex].slideNumber
         const fallbacks = d.policyFallback
-          ? [...new Set([...prev.policyFallbackSlides, slideNum])]
-          : prev.policyFallbackSlides.filter(n => n !== slideNum)
-        const failed = prev.failedSlides.filter(n => n !== slideNum)
-        return { ...prev, imageUrls: updated, policyFallbackSlides: fallbacks, failedSlides: failed }
+          ? [...new Set([...base.policyFallbackSlides, slideNum])]
+          : base.policyFallbackSlides.filter(n => n !== slideNum)
+        return { ...base, imageUrls: updated, policyFallbackSlides: fallbacks, failedSlides: base.failedSlides.filter(n => n !== slideNum) }
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : "再生成失敗")
@@ -281,7 +304,7 @@ export default function TestGeneratePage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             slideIndices:        group,
-            slides:              group.map(i => textResult.generated.slides[i]),
+            slides:              group.map(i => getEffectiveSlide(i)),
             personaId,
             postType,
             productId:           (postType === "product" || postType === "mixed") ? productId : undefined,
@@ -818,7 +841,7 @@ export default function TestGeneratePage() {
                     value={slideInstructions[i] ?? ""}
                     onChange={e => setSlideInstructions(prev => ({ ...prev, [i]: e.target.value }))}
                     onKeyDown={e => {
-                      if (e.key === "Enter" && !e.nativeEvent.isComposing && imageResult?.imageUrls?.[i]) {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                         handleRegenerateSlide(i)
                       }
                     }}
@@ -829,8 +852,8 @@ export default function TestGeneratePage() {
                   />
                   <button
                     onClick={() => handleRegenerateSlide(i)}
-                    disabled={!imageResult?.imageUrls?.[i] || regeneratingIndex !== null || generating}
-                    title={imageResult?.imageUrls?.[i] ? "この画像を修正指示で再生成" : "先に画像を生成してください"}
+                    disabled={regeneratingIndex !== null || generating}
+                    title="この画像を再生成（修正指示・テキスト編集を反映）"
                     className="flex-shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-30"
                     style={{ background: "var(--accent)" }}
                   >
@@ -852,23 +875,54 @@ export default function TestGeneratePage() {
                 )}
               </div>{/* /flex-col */}
 
-              {/* テキスト */}
+              {/* テキスト（編集可能） */}
               <div className="min-w-0 flex-1 space-y-1.5">
+                {/* スライド番号 + タグ（編集可能） */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "var(--accent)", color: "white" }}>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: "var(--accent)", color: "white" }}>
                     {slide.slideNumber}
                   </span>
-                  <span className="text-xs font-bold" style={{ color: "var(--accent)" }}>{slide.tag}</span>
+                  <input
+                    type="text"
+                    value={editedSlides[i]?.tag ?? slide.tag}
+                    onChange={e => setEditedSlides(prev => ({ ...prev, [i]: { ...prev[i], tag: e.target.value } }))}
+                    className="flex-1 min-w-0 text-xs font-bold px-1.5 py-0.5 rounded outline-none"
+                    style={{ color: "var(--accent)", background: "transparent", border: "1px solid var(--border)" }}
+                  />
+                  {editedSlides[i] && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0"
+                      style={{ background: "#f59e0b22", color: "#f59e0b" }}>編集済</span>
+                  )}
                 </div>
-                <p className="font-bold text-sm" style={{ color: "var(--text)" }}>{slide.headline}</p>
-                {slide.bullets && slide.bullets.length > 0 && (
-                  <ul className="text-xs space-y-0.5 list-disc list-inside" style={{ color: "var(--muted)" }}>
-                    {slide.bullets.map((b, j) => <li key={j}>{b}</li>)}
-                  </ul>
-                )}
-                {slide.accent && (
-                  <p className="text-xs italic" style={{ color: "var(--accent)" }}>※ {slide.accent}</p>
-                )}
+                {/* ヘッドライン */}
+                <input
+                  type="text"
+                  value={editedSlides[i]?.headline ?? slide.headline}
+                  onChange={e => setEditedSlides(prev => ({ ...prev, [i]: { ...prev[i], headline: e.target.value } }))}
+                  className="w-full font-bold text-sm px-2 py-1 rounded outline-none"
+                  style={{ color: "var(--text)", background: "transparent", border: "1px solid var(--border)" }}
+                  placeholder="ヘッドライン"
+                />
+                {/* 箇条書き（1行1項目） */}
+                <textarea
+                  value={editedSlides[i]?.bullets ?? (slide.bullets ?? []).join("\n")}
+                  onChange={e => setEditedSlides(prev => ({ ...prev, [i]: { ...prev[i], bullets: e.target.value } }))}
+                  rows={Math.max(2, slide.bullets?.length ?? 2)}
+                  className="w-full text-xs px-2 py-1 rounded outline-none resize-none"
+                  style={{ color: "var(--muted)", background: "transparent", border: "1px solid var(--border)", lineHeight: 1.6 }}
+                  placeholder="箇条書き（1行1項目）"
+                />
+                {/* アクセント */}
+                <input
+                  type="text"
+                  value={editedSlides[i]?.accent ?? (slide.accent ?? "")}
+                  onChange={e => setEditedSlides(prev => ({ ...prev, [i]: { ...prev[i], accent: e.target.value } }))}
+                  className="w-full text-xs italic px-2 py-0.5 rounded outline-none"
+                  style={{ color: "var(--accent)", background: "transparent", border: "1px solid transparent" }}
+                  placeholder="アクセント（任意）"
+                  onFocus={e => (e.currentTarget.style.borderColor = "var(--border)")}
+                  onBlur={e => (e.currentTarget.style.borderColor = "transparent")}
+                />
               </div>
             </div>
           ))}

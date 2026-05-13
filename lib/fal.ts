@@ -538,6 +538,7 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     productImageBase64, productImageUrl, refImageUrl,
     styleDescription, personaHint, visualProfile, slideNumber,
     bgInherit = false,
+    instruction,
   } = params
 
   const hasProduct = !!productImageUrl || (productImageBase64?.length ?? 0) > 100
@@ -568,21 +569,33 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
   //   ③ 1bullet あたり最大 28文字に切り詰め（長すぎるとテキスト生成をスキップされる）
   function normalizeBullet(text: string): string {
     return text
-      .replace(/^[①-⑳]\s*/, "")          // 先頭の丸数字を除去（番号はプロンプト側で付与）
-      .replace(/[｜|]/g, " / ")             // 縦線をスラッシュ区切りに変換
-      .replace(/※\s*/g, "")               // ※記号除去
+      .replace(/^[①-⑳]\s*/, "")          // 先頭の丸数字を除去（マーカーはbulletStyle側で決定）
+      .replace(/^[\d]+[.)、．]\s*/, "")    // 先頭の「1.」「2.」「1)」も除去（同上）
+      .replace(/^[・•\-]\s*/, "")          // 先頭の点・ハイフンを除去（マーカー統一のため）
+      .replace(/[｜|]/g, " / ")
+      .replace(/※\s*/g, "")
       .trim()
-      .slice(0, 28)                         // 28文字上限（FALのテキストレンダリング限界対策）
+      .slice(0, 28)
   }
 
-  const bulletItems = (bullets ?? []).filter(Boolean).slice(0, 5)  // 最大5件
+  const bulletItems = (bullets ?? []).filter(Boolean).slice(0, 5)
+
+  // 元テキストの形式に準拠: 数字箇条書きなら "1." 形式、そうでなければ "•" 形式
+  const isNumberedStyle = (() => {
+    if (bulletItems.length === 0) return false
+    const first = bulletItems[0].trim()
+    return /^[①-⑳]/.test(first) || /^\d+[.)、．]/.test(first)
+  })()
+
   const normalizedBullets = bulletItems.map(normalizeBullet)
 
   const hasBullets = normalizedBullets.length > 0
   const structuredText = [
     `HEADLINE (large bold): "${headline ?? ""}"`,
     hasBullets
-      ? `BODY BULLETS (medium font — noticeably smaller than headline): ${normalizedBullets.map((b, i) => `"${i + 1}. ${b}"`).join(" | ")}`
+      ? `BODY BULLETS (medium font — noticeably smaller than headline): ${normalizedBullets.map((b, i) =>
+          isNumberedStyle ? `"${i + 1}. ${b}"` : `"• ${b}"`
+        ).join(" | ")}`
       : "NO BULLETS — do NOT add any list items, numbered items, or bullet points",
     accentText
       ? `SMALL ACCENT text (smallest size): "${accentText.replace(/※\s*/g, "").slice(0, 25)}"`
@@ -687,6 +700,11 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
         + ` Size: approximately 35% of image width. All label text, logo, colors, and packaging shape must exactly match image 2.`
         + ` The product must NOT be placed on a surface or held by hand — it floats as an editorial cutout element.`
       : `No skincare products, no cosmetics, no product packaging visible anywhere.`,
+
+    // [9] ユーザー追加指示（再生成時の修正内容。他のルールより優先する）
+    instruction
+      ? `OVERRIDE INSTRUCTION (highest priority — apply this change above all other rules): ${instruction}`
+      : null,
 
     `Portrait orientation. ${noUI}`,
 
