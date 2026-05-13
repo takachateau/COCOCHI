@@ -60,6 +60,10 @@ export default function TestGeneratePage() {
   const [error, setError] = useState("")
   const [modalIndex, setModalIndex] = useState<number | null>(null)
 
+  interface CostDisplay { jpy: string; cny: string; usd: string }
+  const [textCost, setTextCost]   = useState<CostDisplay | null>(null)
+  const [imageCost, setImageCost] = useState<CostDisplay | null>(null)
+
   // 初期データ取得
   useEffect(() => {
     fetch("/api/personas").then(r => r.json()).then((d: { personas?: Persona[] }) => setPersonas(d.personas ?? []))
@@ -110,6 +114,8 @@ export default function TestGeneratePage() {
     setError("")
     setTextResult(null)
     setImageResult(null)
+    setTextCost(null)
+    setImageCost(null)
 
     try {
       // ─── テキスト生成 ───
@@ -124,10 +130,11 @@ export default function TestGeneratePage() {
           benchmarkFolderPath: selectedBenchmarkPath ?? undefined,
         }),
       })
-      const d1 = await r1.json() as { types?: Types; generated?: GeneratedPostText; error?: string; refBenchmark?: string }
+      const d1 = await r1.json() as { types?: Types; generated?: GeneratedPostText; error?: string; refBenchmark?: string; textCost?: CostDisplay }
       if (d1.error) throw new Error(d1.error)
       if (!d1.types || !d1.generated) throw new Error("テキスト生成失敗")
       setTextResult({ types: d1.types, generated: d1.generated })
+      if (d1.textCost) setTextCost(d1.textCost)
 
       if (!includeImage) {
         setPhase("done")
@@ -148,10 +155,11 @@ export default function TestGeneratePage() {
           benchmarkFolderPath: selectedBenchmarkPath ?? d1.refBenchmark,  // 手動選択 > テキスト生成時の自動選択
         }),
       })
-      const d2 = await r2.json() as { imageUrls?: (string | null)[]; refBenchmark?: string; policyFallbackSlides?: number[]; failedSlides?: number[]; error?: string }
+      const d2 = await r2.json() as { imageUrls?: (string | null)[]; refBenchmark?: string; policyFallbackSlides?: number[]; failedSlides?: number[]; error?: string; imageCost?: CostDisplay }
       if (d2.error) throw new Error(d2.error)
       if (!d2.imageUrls) throw new Error("画像生成失敗")
       setImageResult({ imageUrls: d2.imageUrls, refBenchmark: d2.refBenchmark ?? "", policyFallbackSlides: d2.policyFallbackSlides ?? [], failedSlides: d2.failedSlides ?? [] })
+      if (d2.imageCost) setImageCost(d2.imageCost)
 
       // 生成結果を Supabase に保存（非ブロッキング）
       fetch("/api/v4/generated-posts", {
@@ -602,6 +610,37 @@ export default function TestGeneratePage() {
           <h2 className="text-lg font-bold" style={{ color: "var(--text)" }}>
             {textResult.generated.overallTitle}
           </h2>
+
+          {/* ─── AI コスト表示 ─── */}
+          {(textCost || imageCost) && (() => {
+            const parseUsd = (s?: string) => parseFloat(s?.replace("$", "") ?? "0") || 0
+            const parseJpy = (s?: string) => parseInt(s?.replace(/[¥,]/g, "") ?? "0") || 0
+            const parseCny = (s?: string) => parseFloat(s?.replace("¥", "") ?? "0") || 0
+            const totalUsd = parseUsd(textCost?.usd) + parseUsd(imageCost?.usd)
+            const totalJpy = parseJpy(textCost?.jpy) + parseJpy(imageCost?.jpy)
+            const totalCny = parseCny(textCost?.cny) + parseCny(imageCost?.cny)
+            return (
+              <div className="mt-3 flex flex-wrap gap-2 text-xs" style={{ color: "var(--muted)" }}>
+                <span className="font-bold" style={{ color: "var(--text)" }}>AI原価:</span>
+                {textCost && (
+                  <span className="px-2 py-0.5 rounded-full" style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
+                    テキスト {textCost.jpy} <span style={{ opacity: 0.6 }}>/ ¥{parseCny(textCost.cny).toFixed(2)} CNY</span>
+                  </span>
+                )}
+                {imageCost && (
+                  <span className="px-2 py-0.5 rounded-full" style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
+                    画像 {imageCost.jpy} <span style={{ opacity: 0.6 }}>/ ¥{parseCny(imageCost.cny).toFixed(2)} CNY</span>
+                  </span>
+                )}
+                {textCost && imageCost && (
+                  <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: "var(--accent-light)", color: "var(--accent)", border: "1px solid var(--accent)" }}>
+                    合計 ¥{totalJpy.toLocaleString("ja-JP")} / ¥{totalCny.toFixed(2)} CNY
+                    <span className="ml-1 font-normal opacity-60">(${totalUsd.toFixed(4)})</span>
+                  </span>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
 

@@ -134,6 +134,7 @@ export interface GeneratedPostText {
   overallTitle: string
   slides: GeneratedSlide[]
   caption: string
+  claudeUsage?: Array<{ inputTokens: number; outputTokens: number; model: "sonnet" | "haiku" }>
 }
 
 export interface GeneratedSlide {

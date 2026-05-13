@@ -16,6 +16,7 @@ import { loadProducts } from "@/lib/products"
 import { describeV3SlideStyle } from "@/lib/referenceV2"
 import { generateV2Slide } from "@/lib/fal"
 import { uploadSlideBuffers } from "@/lib/storage"
+import { calcFalCost, formatCost } from "@/lib/aiCost"
 import type {
   GeneratedPostText,
   GeneratedSlide,
@@ -322,11 +323,11 @@ export async function POST(req: NextRequest) {
     }))
 
     // settled 結果を整理: 失敗 or buffer=null のスライドは null URL にする
-    type SlideResult = { buffer: Buffer | null; policyFallback: boolean; slideNumber: number; index: number }
+    type SlideResult = { buffer: Buffer | null; policyFallback: boolean; falCalls: number; slideNumber: number; index: number }
     const slideResults: SlideResult[] = settled.map((s, i) =>
       s.status === "fulfilled"
         ? s.value
-        : { buffer: null, policyFallback: false, slideNumber: slides[i].slideNumber, index: i },
+        : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i },
     )
 
     // null でないバッファだけアップロード
@@ -345,11 +346,22 @@ export async function POST(req: NextRequest) {
       console.warn(`[v4/generate-image] ${failedSlides.length}枚が生成失敗（ポリシー違反・全スライド分離）: slides ${failedSlides.join(",")}`)
     }
 
+    // 画像生成コスト: スライドごとの FAL 呼び出し回数を集計
+    const totalFalCalls    = slideResults.reduce((s, r) => s + (r.falCalls ?? 1), 0)
+    const hasImageSlides   = slideResults.some((_, i) => {
+      const slide = slides[i]
+      return (postType === "product" || postType === "mixed") &&
+        pickProductForSlide(slide, product, competitors, postType) !== null
+    })
+    const imageCostRaw  = calcFalCost(totalFalCalls, hasImageSlides)
+    const imageCost     = formatCost(imageCostRaw)
+
     return NextResponse.json({
       imageUrls,          // null = そのスライドは生成失敗
       refBenchmark: refBenchmark.folderPath,
       policyFallbackSlides,
       failedSlides,       // 生成完全失敗したスライド番号一覧
+      imageCost,          // { jpy, cny, usd }
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

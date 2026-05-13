@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { dbLoadPersonas, dbLoadBenchmarkPosts, dbLoadCompetitorProducts, dbLoadRecentPostsByPersona } from "@/lib/supabase"
 import { loadProducts } from "@/lib/products"
 import { selectTypeCombination, generateV3Post, isDuplicatePost } from "@/lib/v3Generate"
+import { calcClaudeCost, formatCost } from "@/lib/aiCost"
 import type { PostType } from "@/types/v2"
 
 export const maxDuration = 120
@@ -87,9 +88,12 @@ export async function POST(req: NextRequest) {
       : benchmarkPosts.filter(b => b.postType === "tips").slice(0, 3)
 
     // 競合商品: product/mixed のときのみ取得（ベンチマークが比較型なら使う）
-    const competitors = (postType === "product" || postType === "mixed") && productId
+    const allCompetitors = (postType === "product" || postType === "mixed") && productId
       ? await dbLoadCompetitorProducts(productId).catch(() => [])
       : []
+    // ベンチマーク枚数に合わせて競合件数を制限: hook(1) + 自社(1) + CTA(1) = 3固定スロット
+    const maxCompetitors = targetSlideCount !== undefined ? Math.max(0, targetSlideCount - 3) : allCompetitors.length
+    const competitors = allCompetitors.slice(0, maxCompetitors)
 
     // 過去30件の生成済み投稿タイトルを取得（被り防止用）
     const recentPosts = await dbLoadRecentPostsByPersona(personaId, 30).catch(() => [])
@@ -106,10 +110,14 @@ export async function POST(req: NextRequest) {
       generated = await generateV3Post(generateParams)
     }
 
+    const textCostRaw = generated.claudeUsage ? calcClaudeCost(generated.claudeUsage) : null
+    const textCost = textCostRaw ? formatCost(textCostRaw) : null
+
     return NextResponse.json({
       types,
       generated,
       refBenchmark: selectedBenchmark?.folderPath,  // generate-image に渡して同じベンチマークを使う
+      textCost,     // { jpy, cny, usd }
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

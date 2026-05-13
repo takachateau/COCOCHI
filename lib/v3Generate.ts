@@ -190,7 +190,7 @@ ${competitors.map((c, i) => `[C${i + 1}] ${c.brandName} / ${c.productName} / ${c
   - **1スライド = 1商品紹介** が絶対原則。**複数商品を1スライドに詰め込むのは絶対禁止**。
   - 商品スライドの headline には **1商品の実名（ブランド名+商品名）と価格** を必ず書く（例: "SKIN1004 ヒアルーシカ サンセラム ¥2,700"）
   - 商品名は上のリスト [C1]〜[C${competitors.length}] から **そのままコピー** して使う（自分で言い換えない・短縮しない）
-  - 各商品スライドの bullets には: 特徴2〜3個・メリット・デメリット を上のリストから引用して書く
+  - 各商品スライドの bullets には: 特徴2〜3個・メリット・デメリット を上のリストから引用して書く（各要素は番号・記号・ダッシュなし、プレーンテキストのみ）
   - **複数商品リスト・順位一覧・カタログ的な総覧スライドは作らない**（例: "10位 X / 9位 Y / 8位 Z..." を1スライドに並べるのは絶対NG）
   - 自社（アネトス）は「最推し」として強調（最終 or 中央のスライドで accent="← 最推し" のような注記）
 
@@ -283,13 +283,14 @@ JSONのみ（前後に説明・コードブロック禁止）:
   "caption": "Lemon8キャプション原文（150〜400文字・自然な口調・絵文字使用OK・改行は\\nでエスケープ）"
 }
 
+⚠ bullets の絶対ルール: 各要素の先頭に番号（1. 2. 3.）・記号（・ー- *）を付けない。プレーンテキストのみ。
+
 ${targetSlideCount
-  ? (postType === "product" || postType === "mixed") && competitors && competitors.length > 0
-    ? `【スライド枚数】参考目安は ${targetSlideCount}枚。ただし **商品比較投稿では「1スライド=1商品」ルールが優先**。
-- タイトルに数字（例: ベスト5・10選）を入れる場合: その数字 + 2（hook + CTA）= 必要枚数
-- 数字を入れない場合: 商品3〜5個を選定して 5〜7枚に収める
-- ベンチマークの枚数より多くても少なくてもOK（商品スライド数を最優先）`
-    : `【スライド枚数（絶対厳守）】${targetSlideCount}枚ちょうど。1枚でも多くても少なくてもNG。`
+  ? `【スライド枚数（絶対厳守）】${targetSlideCount}枚ちょうど。1枚でも多くても少なくてもNG。${
+      (postType === "product" || postType === "mixed") && competitors && competitors.length > 0
+        ? `\n- 内訳: フック1枚 + 商品スライド${targetSlideCount - 2}枚（自社1＋競合${competitors.length}）+ CTA1枚 = ${targetSlideCount}枚\n- 渡された競合商品リスト（${competitors.length}件）を過不足なく全て使うこと`
+        : ""
+    }`
   : `スライド枚数の目安:
 - S1 フル装備: 6〜8枚
 - S2 最短: 4〜5枚
@@ -308,6 +309,10 @@ ${targetSlideCount
     max_tokens: 4096,
     messages: [{ role: "user", content: prompt }],
   })
+
+  const claudeUsage: Array<{ inputTokens: number; outputTokens: number; model: "sonnet" | "haiku" }> = [
+    { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: "sonnet" },
+  ]
 
   const text = res.content[0].type === "text" ? res.content[0].text : "{}"
   const jsonStart = text.indexOf("{")
@@ -342,6 +347,7 @@ ${rawJson}
 valid JSON のみ返答（前後の説明禁止）`,
       }],
     })
+    claudeUsage.push({ inputTokens: fixed.usage.input_tokens, outputTokens: fixed.usage.output_tokens, model: "haiku" })
     const fixedText = fixed.content[0].type === "text" ? fixed.content[0].text : ""
     const fStart = fixedText.indexOf("{")
     const fEnd   = fixedText.lastIndexOf("}")
@@ -356,11 +362,14 @@ valid JSON のみ返答（前後の説明禁止）`,
   }
   const r = parsed as RawText
 
+  const stripBulletPrefix = (text: string) =>
+    text.replace(/^\s*(?:\d+[.)、]\s*|[-・ー*]\s+)/, "").trim()
+
   const slides: GeneratedSlide[] = r.slides.map(s => ({
     slideNumber: s.slide_number,
     tag:         s.tag,
     headline:    s.headline,
-    bullets:     s.bullets,
+    bullets:     s.bullets?.map(stripBulletPrefix),
     accent:      s.accent,
   }))
 
@@ -368,5 +377,6 @@ valid JSON のみ返答（前後の説明禁止）`,
     overallTitle: r.overall_title,
     slides,
     caption:      r.caption,
+    claudeUsage,
   }
 }

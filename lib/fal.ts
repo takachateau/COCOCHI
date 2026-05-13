@@ -527,6 +527,7 @@ export interface V2SlideParams {
 export interface V2SlideResult {
   buffer: Buffer | null   // null = ポリシー違反でフォールバックも失敗（生成不可）
   policyFallback: boolean // trueの場合: FALポリシー違反でスタイル説明なしで再生成した
+  falCalls: number        // 実際に FAL を呼んだ回数（ポリシー再生成は2）
 }
 
 export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideResult> {
@@ -689,7 +690,7 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
 
   try {
     const buffer = await generateImage(prompt, imageUrls)
-    return { buffer, policyFallback: false }
+    return { buffer, policyFallback: false, falCalls: 1 }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (!msg.startsWith("FAL_CONTENT_POLICY")) throw err
@@ -715,12 +716,12 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     console.log(`[generateV2Slide] fallback prompt[:200]: ${fallbackPrompt.slice(0, 200)}`)
     try {
       const buffer = await generateImage(fallbackPrompt, imageUrls)
-      return { buffer, policyFallback: true }
+      return { buffer, policyFallback: true, falCalls: 2 }
     } catch (fallbackErr) {
       // フォールバックも失敗した場合は null を返す（例外は投げない）
       // → Promise.all が他スライドを道連れにするのを防ぐ
       console.error(`[generateV2Slide] fallback also failed on slide ${slideNumber}:`, fallbackErr)
-      return { buffer: null, policyFallback: true }
+      return { buffer: null, policyFallback: true, falCalls: 2 }
     }
   }
 }

@@ -18,13 +18,6 @@ const NAV_HREFS = [
   { href: "/v4/plan",          key: "plan"         },
 ] as const
 
-const VERSIONS = [
-  { label: "V1", href: "/" },
-  { label: "V2", href: "/v2/plan" },
-  { label: "V3", href: "/v3/test-generate" },
-  { label: "V4", href: "/v4/test-generate" },
-]
-const CURRENT = "V4"
 
 const STATUS_ICONS = {
   pending:          { icon: Clock,        color: "#6b7280" },
@@ -427,23 +420,6 @@ export default function V4Layout({ children }: { children: React.ReactNode }) {
             )}
           </button>
 
-          {/* バージョン切り替え */}
-          <div className="flex rounded-lg overflow-hidden flex-shrink-0" style={{ border: "1px solid var(--border)" }}>
-            {VERSIONS.map((v, i) => (
-              <Link
-                key={v.label}
-                href={v.href}
-                className="px-3 py-1.5 text-xs font-bold transition-opacity hover:opacity-80"
-                style={{
-                  background: v.label === CURRENT ? "var(--accent)" : "var(--card)",
-                  color:      v.label === CURRENT ? "white" : "var(--text)",
-                  borderLeft: i > 0 ? "1px solid var(--border)" : "none",
-                }}
-              >
-                {v.label}
-              </Link>
-            ))}
-          </div>
         </div>
       </header>
 

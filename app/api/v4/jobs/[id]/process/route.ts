@@ -301,7 +301,11 @@ export async function POST(
     const recentPosts = await dbLoadRecentPostsByPersona(job.personaId, 30).catch(() => [])
     const history = recentPosts.map(p => p.overallTitle)
 
-    const generateParams = { persona, postType: job.postType as PostType, product, types, benchmarkSamples, competitors, targetSlideCount, history }
+    // ベンチマーク枚数に合わせて競合件数を制限: hook(1) + 自社(1) + CTA(1) = 3固定スロット
+    const maxCompetitors = targetSlideCount !== undefined ? Math.max(0, targetSlideCount - 3) : competitors.length
+    const trimmedCompetitors = competitors.slice(0, maxCompetitors)
+
+    const generateParams = { persona, postType: job.postType as PostType, product, types, benchmarkSamples, competitors: trimmedCompetitors, targetSlideCount, history }
     let generated = await generateV3Post(generateParams)
     for (let attempt = 0; attempt < 2; attempt++) {
       const duplicate = await isDuplicatePost(generated.overallTitle, history)
