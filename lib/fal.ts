@@ -631,11 +631,13 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     // bgInherit=true (同背景グループの2枚目以降): 参照画像と同一背景を維持
     // bgInherit=false (通常): ベンチマークの屋内/屋外タイプを踏襲しつつ具体的場所は変える
     bgInherit
-      ? `Background: KEEP THE EXACT SAME background as the reference image — copy it with pixel-perfect precision.`
-        + ` The background must be IDENTICAL: same outdoor/indoor setting, same specific location (same street, same building, same room), same sky color and cloud pattern, same trees or foliage, same architecture, same surface textures, same ambient lighting direction, same color grading, same time of day, same atmosphere and mood.`
-        + ` This is a BACKGROUND INHERITANCE shot — the background must look like a continuation of the exact same moment and location.`
-        + ` ONLY update: the text overlay content, and adjust the person's outfit if the persona spec requires it. Nothing else changes.`
-        + ` FORBIDDEN: changing location type, adding new background objects, altering lighting color, shifting time of day, replacing the scene with a different place.`
+      ? `Background — INPAINTING MODE (critical): treat this task as an inpainting job, NOT a generation job.`
+        + ` PRESERVE pixel-for-pixel: every background element in the reference image — the exact walls, floors, surfaces, objects, plants, windows, architecture, street, sky, clouds, lighting direction, color temperature, shadows, reflections, and atmospheric depth.`
+        + ` PRESERVE: the person's position, framing, and body pose in the shot.`
+        + ` You are ONLY ALLOWED to change two things: (1) the text overlay — erase old text and render new text content; (2) product cutout — swap the product being held or shown to the product in Image 2 if applicable.`
+        + ` Everything else — the entire background, the scene, the lighting, the time of day, the color grading — must remain completely unchanged as if you painted over only the text and product areas.`
+        + ` STRICTLY FORBIDDEN: regenerating the scene, changing location, altering background colors, modifying lighting, adding or removing any environmental element.`
+        + ` This slide is part of a SAME-SCENE GROUP — viewers must feel they are looking at the same photo shoot with only the product and text changed.`
       : `Background setting type: READ the style description above to determine if the reference image is OUTDOOR, INDOOR, CAFE/SHOP, ROOFTOP, STREET, etc.`
         + ` MATCH that setting type exactly — if the reference is outdoor, generate an outdoor scene; if cafe, generate a cafe; if indoor apartment, generate an indoor room. NEVER force all slides indoors.`
         + (safeVisualProfile?.setting
