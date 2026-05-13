@@ -663,7 +663,6 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
       `- Camera angle and framing`,
       ``,
       `TEXT TO ADD (place in natural Lemon8 post layout — lower half or overlay area):`,
-      `TAG (small colored label): "${tag}"`,
       `HEADLINE (largest text, bold): "${headline}"`,
       hasBullets
         ? `BODY BULLETS (medium size): ${normalizedBullets.map((b, i) =>
@@ -692,7 +691,7 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
       // ポリシー違反フォールバック: さらにシンプルに
       const fallback = [
         `Image edit: replace only the text overlay. Keep background and person identical.`,
-        `New text: TAG="${tag}" HEADLINE="${headline}"`,
+        `New text: HEADLINE="${headline}"`,
         hasBullets ? `BULLETS: ${normalizedBullets.map(b => `"• ${b}"`).join(" | ")}` : null,
         accentText ? `ACCENT: "${accentText}"` : null,
         `Portrait orientation. ${noUI}`,
