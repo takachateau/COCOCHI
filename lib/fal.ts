@@ -233,6 +233,52 @@ async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffe
   }
 }
 
+// ─── 素背景生成（背景グループ用） ─────────────────────────────────
+// 背景グループの全スライドが参照する「テキストなし・商品なし」のベース写真を生成する。
+// このベースを全スライドで共有することで背景の一致を保証する。
+export async function generateBaseSlide(params: {
+  refImageUrl: string
+  styleDescription: string
+  colorPalette: string
+  visualProfile?: { hair: string; fashion: string; setting: string; photoStyle: string }
+  personaHint?: string
+}): Promise<{ buffer: Buffer | null }> {
+  const { refImageUrl, styleDescription, visualProfile, personaHint } = params
+
+  const safeStyleDesc    = sanitizeForFal(styleDescription)
+  const safePersonaHint  = personaHint ? sanitizeForFal(personaHint) : undefined
+  const safeVisualProfile = visualProfile ? {
+    hair:       sanitizeForFal(visualProfile.hair),
+    fashion:    sanitizeForFal(visualProfile.fashion),
+    setting:    sanitizeForFal(visualProfile.setting),
+    photoStyle: sanitizeForFal(visualProfile.photoStyle),
+  } : undefined
+
+  const prompt = [
+    `Clean lifestyle photo. ${SMARTPHONE_FEEL}.`,
+    safeStyleDesc ? `Visual style reference: ${safeStyleDesc}.` : null,
+    `Composition: copy ONLY framing, camera angle, and shot type from the reference image. Do NOT copy text or products.`,
+    `Background: match the reference image's background setting exactly — same type of location (indoor/outdoor/cafe/street etc.), same furniture or scenery elements, same lighting mood.`,
+    safeVisualProfile
+      ? `Person: Hair: ${safeVisualProfile.hair}. Fashion: ${safeVisualProfile.fashion}. Young woman (20s), East Asian aesthetic.`
+        + (safeVisualProfile.photoStyle ? ` Photo style: ${safeVisualProfile.photoStyle}.` : "")
+      : `Person: young woman (20s), East Asian aesthetic, casual everyday fashion. Same shot type as reference.`,
+    safePersonaHint ? `Character context: ${safePersonaHint}.` : null,
+    `CRITICAL RULE — NO TEXT OF ANY KIND: do not render any text, labels, headlines, bullets, numbers, or characters anywhere in the image. The photo must be 100% text-free.`,
+    `NO PRODUCTS: do not show any skincare items, bottles, packaging, or cosmetics.`,
+    `Portrait orientation. no watermark, no repost icon, no social media UI.`,
+  ].filter(Boolean).join("  ")
+
+  console.log(`[generateBaseSlide] prompt[:200]: ${prompt.slice(0, 200)}`)
+  try {
+    const buffer = await generateImage(prompt, [refImageUrl])
+    return { buffer }
+  } catch (err) {
+    console.error("[generateBaseSlide] 生成失敗:", err)
+    return { buffer: null }
+  }
+}
+
 // ─── 公開 API ─────────────────────────────────────────────────────
 
 export interface UGCCoverParams {
@@ -606,35 +652,32 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
   // 通常プロンプトの [1]「スマホ写真生成」[2]「背景をコピーするな」[4]「人物生成」が
   // 「背景をそのまま保て」と真逆の指示になるため、bgInherit では全セクションを捨てる。
   if (bgInherit) {
+    // ベースは「テキストなし・商品なし」の素背景なので「消去」は不要 — 追加のみ
     const bgInheritPrompt = [
-      `Minimal image edit task. You are given an existing photo (Image 1).`,
-      `YOUR ONLY JOB: erase the existing text overlay and render new text in its place.`,
+      `Add a text overlay to this clean photo (Image 1). The photo has NO existing text — your job is ONLY to ADD new text on top of it.`,
       ``,
-      `PRESERVE EVERYTHING ELSE in Image 1 — do not change:`,
-      `- Background, walls, floor, windows, furniture, plants, street, sky, any scenery`,
+      `PRESERVE EVERYTHING in Image 1 exactly as-is:`,
+      `- Background, walls, floor, windows, furniture, plants, street, sky, all scenery`,
       `- The person's face, body, hair, clothing, pose, and position`,
       `- Lighting, shadows, color grading, and atmosphere`,
-      `- Camera angle, framing, and shot type`,
+      `- Camera angle and framing`,
       ``,
-      `DO NOT regenerate, reimagine, or alter any visual element except the text.`,
-      ``,
-      `NEW TEXT TO RENDER (replace all existing text with exactly this):`,
-      `TAG (small colored label, same position as original): "${tag}"`,
-      `HEADLINE (largest text, bold, same position as original): "${headline}"`,
+      `TEXT TO ADD (place in natural Lemon8 post layout — lower half or overlay area):`,
+      `TAG (small colored label): "${tag}"`,
+      `HEADLINE (largest text, bold): "${headline}"`,
       hasBullets
-        ? `BODY BULLETS (medium size, same position as original): ${normalizedBullets.map((b, i) =>
+        ? `BODY BULLETS (medium size): ${normalizedBullets.map((b, i) =>
             isNumberedStyle ? `"${i + 1}. ${b}"` : `"• ${b}"`).join(" | ")}`
-        : `NO BODY BULLETS — leave that area as background`,
-      accentText ? `ACCENT (small text, same position as original): "${accentText}"` : null,
+        : `NO BODY BULLETS`,
+      accentText ? `ACCENT (small text): "${accentText}"` : null,
       ``,
       hasProduct && productImageUrl
-        ? `ADDITIONALLY: Replace the product item shown in the photo with the product from Image 2. Keep the product in the same position, size, and orientation as in Image 1. All other elements unchanged.`
-        : null,
+        ? `ALSO ADD: extract the product from Image 2 (remove its white/plain background) and place it as a clean floating cutout in the LEFT THIRD of the image, vertically centered. Size: ~35% of image width.`
+        : `No products, no skincare items, no packaging visible.`,
       ``,
       FONT_SPEC,
-      `ERASE completely: any Lemon8 app logo, @username badge, or platform watermark.`,
-      `${noUI}`,
-      instruction ? `ADDITIONAL INSTRUCTION (apply on top of everything above): ${instruction}` : null,
+      `no watermark, no repost icon, no social media UI, no Lemon8 logo, no @username badge.`,
+      instruction ? `ADDITIONAL INSTRUCTION: ${instruction}` : null,
     ].filter(Boolean).join("\n")
 
     console.log(`[generateV2Slide] bgInherit prompt[:300]: ${bgInheritPrompt.slice(0, 300)}`)

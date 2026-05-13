@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { dbLoadPersonas, dbLoadBenchmarkPosts, dbLoadCompetitorProducts, dbUpdateBenchmarkSlideStyleDescs } from "@/lib/supabase"
 import { loadProducts } from "@/lib/products"
 import { describeV3SlideStyle } from "@/lib/referenceV2"
-import { generateV2Slide } from "@/lib/fal"
+import { generateV2Slide, generateBaseSlide } from "@/lib/fal"
 import { uploadSlideBuffers } from "@/lib/storage"
 import { calcFalCost, formatCost } from "@/lib/aiCost"
 import type {
@@ -350,30 +350,63 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        // 複数スライドが同背景: 1枚目を生成してアップロード、以降はその URL を参照
+        // ── 複数スライドが同背景: 素背景を先に1枚生成 → 全スライドで共有 ──
+        // 旧設計: スライド1生成(テキスト付き) → 2枚目以降がそれを参照して「テキスト消去+追加」
+        //   問題: テキスト消去 = 背景の一部を補完 = モデルが背景全体を作り直す
+        // 新設計: テキストなし・商品なしの素背景を1枚先に生成 → 全スライドが同じ素背景に
+        //         「テキストを追加するだけ」なので背景が崩れない
         const first = validIndices[0]
-        const firstResult = await generateOneSlide(first).catch(() =>
-          ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[first].slideNumber, index: first } as SlideResult)
-        )
-        slideResults[first] = firstResult
+        const firstRefUrl = slideRefUrls[first]
+        const firstStyleDesc = styleDescMap.get(firstRefUrl) ?? ""
 
-        // 1枚目が成功したらアップロードして URL を取得
-        let groupRefUrl: string | undefined
-        if (firstResult.buffer) {
-          const [url] = await uploadSlideBuffers([firstResult.buffer])
-          groupRefUrl = url
-          // アップロード済みなのでバッファを null に（二重アップロード防止）
-          slideResults[first] = { ...firstResult, buffer: null, _uploadedUrl: url } as SlideResult & { _uploadedUrl: string }
-        }
+        console.log(`[v4/generate-image] group ${JSON.stringify(validIndices)}: 素背景を生成中...`)
+        const baseResult = await generateBaseSlide({
+          refImageUrl:      firstRefUrl,
+          styleDescription: [firstStyleDesc, compositionHint].filter(Boolean).join("  "),
+          colorPalette,
+          visualProfile,
+          personaHint,
+        })
 
-        // 2枚目以降: 直列で生成（1枚目の生成結果を背景参照として渡す）
-        for (const bi of validIndices.slice(1)) {
-          if (bi >= slides.length) continue
-          const result = await generateOneSlide(bi, groupRefUrl).catch(() =>
-            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi } as SlideResult)
+        let groupBaseUrl: string | undefined
+        if (baseResult.buffer) {
+          const [url] = await uploadSlideBuffers([baseResult.buffer])
+          groupBaseUrl = url
+          console.log(`[v4/generate-image] 素背景アップロード完了: ${url.slice(0, 60)}`)
+        } else {
+          // 素背景生成失敗時: 旧来のフォールバック（1枚目を通常生成して参照）
+          console.warn(`[v4/generate-image] 素背景生成失敗 — フォールバック: 旧来の方法で生成`)
+          const firstResult = await generateOneSlide(first).catch(() =>
+            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[first].slideNumber, index: first } as SlideResult)
           )
-          slideResults[bi] = result
+          slideResults[first] = firstResult
+          if (firstResult.buffer) {
+            const [url] = await uploadSlideBuffers([firstResult.buffer])
+            groupBaseUrl = url
+            slideResults[first] = { ...firstResult, buffer: null, _uploadedUrl: url } as SlideResult & { _uploadedUrl: string }
+          }
+          for (const bi of validIndices.slice(1)) {
+            if (bi >= slides.length) continue
+            const result = await generateOneSlide(bi, groupBaseUrl).catch(() =>
+              ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi } as SlideResult)
+            )
+            slideResults[bi] = result
+          }
+          return
         }
+
+        // 素背景が得られたら全スライドを並列生成（直列不要 — 依存関係がなくなった）
+        const groupSettled = await Promise.allSettled(
+          validIndices
+            .filter(bi => bi < slides.length)
+            .map(bi => generateOneSlide(bi, groupBaseUrl))
+        )
+        groupSettled.forEach((r, idx) => {
+          const bi = validIndices[idx]
+          slideResults[bi] = r.status === "fulfilled"
+            ? r.value
+            : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi }
+        })
       }))
     } else {
       // 従来通り: 全スライド並列生成
