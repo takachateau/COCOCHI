@@ -1,9 +1,10 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Sparkles, ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader } from "lucide-react"
+import { ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader } from "lucide-react"
 import type { GenerationJob } from "@/types/v2"
 import { useLanguage } from "@/context/language"
 import { useT } from "@/lib/i18n"
@@ -350,14 +351,15 @@ export default function V4Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen" style={{ background: "var(--bg)" }}>
       <header style={{ background: "var(--card)", borderBottom: "1px solid var(--border)" }}>
         <div className="max-w-screen-xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-4">
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <div
-              className="w-7 h-7 rounded-md flex items-center justify-center"
-              style={{ background: "var(--accent)" }}
-            >
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-bold text-sm" style={{ color: "var(--text)" }}>COCOCHI</span>
+          <div className="flex items-center flex-shrink-0">
+            <Image
+              src="/cocochi-logo.png"
+              alt="COCOCHI"
+              width={120}
+              height={36}
+              className="h-9 w-auto"
+              priority
+            />
           </div>
 
           <nav className="flex items-center gap-1 flex-1">
