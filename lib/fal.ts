@@ -83,6 +83,10 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
           `FAL ${e.status} ${e.message ?? "error"}${bodyStr ? " | detail: " + bodyStr : ""}`
         )
       }
+      // タイムアウトはリトライしない:
+      // 新たな FAL リクエストを submit してもタイムアウトが繰り返されるだけで
+      // 重複リクエストが増え続ける。Vercel の 300s 上限内に収まらなくなるため即失敗にする。
+      if (e.message?.startsWith("FAL poll timeout")) throw err
       if (i === retries) throw err
       await new Promise(r => setTimeout(r, delay * i))
     }
@@ -161,28 +165,54 @@ async function falFetch(url: string): Promise<Buffer> {
  * queue.submit() + status ポーリング方式は純粋なHTTPで完結し、
  * 接続断の影響を受けない。
  *
- * タイムアウト: 1枚あたり最大120秒（セマフォ5並列 × 2バッチ = 240s < Vercel 300s）
+ * タイムアウト: 1枚あたり最大85秒。タイムアウトは withRetry でリトライしない（重複リクエスト防止）。
+ * submit+status+result の各 HTTP 呼び出しにも AbortController でタイムアウトを設定済み。
  */
 async function falQueueGenerate(
   modelId: string,
   input: Record<string, unknown>,
 ): Promise<FalResult> {
-  const POLL_INTERVAL_MS = 4_000   // 4秒ごとにステータス確認
-  const MAX_WAIT_MS      = 120_000 // 最大2分（スライド1枚あたり）
+  const POLL_INTERVAL_MS = 5_000   // 5秒ごとにステータス確認
+  const MAX_WAIT_MS      = 85_000  // 最大85秒（Vercel 300s / 最大3並列スライド でも収まる余裕）
 
-  const submitted = await fal.queue.submit(modelId, { input })
+  // submit 自体にも AbortController でタイムアウトを設定する
+  // → submit が応答なし（ネットワーク断）でも 30s で抜けられる
+  const submitController = new AbortController()
+  const submitTimer = setTimeout(() => submitController.abort(), 30_000)
+  let submitted: { request_id: string }
+  try {
+    submitted = await fal.queue.submit(modelId, {
+      input,
+      abortSignal: submitController.signal,
+    } as Parameters<typeof fal.queue.submit>[1])
+  } finally {
+    clearTimeout(submitTimer)
+  }
+
   const requestId = submitted.request_id
   console.log(`[FAL] submitted ${modelId} → requestId=${requestId}`)
 
-  const deadline = Date.now() + MAX_WAIT_MS
+  const startedAt = Date.now()
+  const deadline = startedAt + MAX_WAIT_MS
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
-    const status = await fal.queue.status(modelId, {
-      requestId,
-      logs: false,
-    }) as FalQueueStatus
 
-    console.log(`[FAL] ${requestId} status=${status.status} (${Math.floor((Date.now() - (deadline - MAX_WAIT_MS)) / 1000)}s)`)
+    // 各 status チェックにも 10s タイムアウトを設ける（ネットワーク断での無限待機を防ぐ）
+    const statusController = new AbortController()
+    const statusTimer = setTimeout(() => statusController.abort(), 10_000)
+    let status: FalQueueStatus
+    try {
+      status = await fal.queue.status(modelId, {
+        requestId,
+        logs:        false,
+        abortSignal: statusController.signal,
+      }) as FalQueueStatus
+    } finally {
+      clearTimeout(statusTimer)
+    }
+
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+    console.log(`[FAL] ${requestId} status=${status.status} (${elapsed}s)`)
 
     if (status.status === "COMPLETED") {
       const res = await fal.queue.result(modelId, { requestId })
@@ -193,7 +223,7 @@ async function falQueueGenerate(
     }
   }
 
-  throw new Error(`FAL poll timeout 120s: requestId=${requestId} — image may have been generated on FAL side`)
+  throw new Error(`FAL poll timeout ${MAX_WAIT_MS / 1000}s: requestId=${requestId}`)
 }
 
 /**
@@ -622,19 +652,10 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
   // FAL に渡すbulletは:
   //   ① 丸数字などの特殊記号を除去（FALがレンダリングできない）
   //   ② 縦線「｜」を " / " に変換（視認性向上）
-  //   ③ 1bullet あたり最大 28文字に切り詰め（長すぎるとテキスト生成をスキップされる）
-  function normalizeBullet(text: string): string {
-    return text
-      .replace(/^[①-⑳]\s*/, "")          // 先頭の丸数字を除去（マーカーはbulletStyle側で決定）
-      .replace(/^[\d]+[.)、．]\s*/, "")    // 先頭の「1.」「2.」「1)」も除去（同上）
-      .replace(/^[・•\-]\s*/, "")          // 先頭の点・ハイフンを除去（マーカー統一のため）
-      .replace(/[｜|]/g, " / ")
-      .replace(/※\s*/g, "")
-      .trim()
-      .slice(0, 28)
-  }
+  //   ③ 最大 3 件・1件あたり最大 22 字に切り詰め（多すぎると下端が切れる）
 
-  const bulletItems = (bullets ?? []).filter(Boolean).slice(0, 5)
+  // 最大 3 件に絞る（5件だと FAL の描画領域を超えて下端が切れる）
+  const bulletItems = (bullets ?? []).filter(Boolean).slice(0, 3)
 
   // 元テキストの形式に準拠: 数字箇条書きなら "1." 形式、そうでなければ "•" 形式
   const isNumberedStyle = (() => {
@@ -642,6 +663,18 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     const first = bulletItems[0].trim()
     return /^[①-⑳]/.test(first) || /^\d+[.)、．]/.test(first)
   })()
+
+  // 1bullet = 最大 22 字（28 → 22 に縮小）
+  function normalizeBullet(text: string): string {
+    return text
+      .replace(/^[①-⑳]\s*/, "")
+      .replace(/^[\d]+[.)、．]\s*/, "")
+      .replace(/^[・•\-]\s*/, "")
+      .replace(/[｜|]/g, " / ")
+      .replace(/※\s*/g, "")
+      .trim()
+      .slice(0, 22)
+  }
 
   const normalizedBullets = bulletItems.map(normalizeBullet)
 
@@ -654,8 +687,9 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
         ).join(" | ")}`
       : "NO BULLETS — do NOT add any list items, numbered items, or bullet points",
     accentText
-      ? `SMALL ACCENT text (smallest size): "${accentText.replace(/※\s*/g, "").slice(0, 25)}"`
+      ? `SMALL ACCENT text (smallest size): "${accentText.replace(/※\s*/g, "").slice(0, 20)}"`
       : null,
+    `CRITICAL LAYOUT: ALL text elements MUST be fully visible within the image frame — no clipping, no cropping at edges. Use smaller font sizes if needed to ensure every character is legible.`,
   ].filter(Boolean).join("  ")
 
   // ─── bgInherit=true の場合: 超シンプルなテキスト置換専用プロンプトを使う ───
@@ -799,7 +833,7 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     + ` — Text size hierarchy: headline LARGE, bullets MEDIUM, accent SMALL.`
     + ` New content: ${structuredText}.`
     + ` ZERO hallucination rule: render ONLY the exact text elements listed above. If "NO BULLETS" is specified, the area below the headline must remain background — do NOT invent or add any list items, numbers, or bullet points from the reference or from context.`
-    + ` Text must not exceed 55% of image area. Person and background must remain clearly visible.`
+    + ` Text must not exceed 45% of image area. ALL text elements must be fully visible and never clipped by the image edge. Person and background must remain clearly visible.`
     + ` ${FONT_SPEC}`,
 
     // [7]

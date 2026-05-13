@@ -135,6 +135,9 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
               const isDone = job.status === "done"
               const isCancellable = isActive || isPending
               const isCancelling = cancelling.has(job.id)
+              // Vercel の最大実行時間（300s）を超えたらスタックとみなす
+              const elapsedSec = (Date.now() - new Date(job.updatedAt ?? job.createdAt).getTime()) / 1000
+              const isStuck = isActive && elapsedSec > 360
               return (
                 <div
                   key={job.id}
@@ -155,22 +158,30 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                   >
                     <div className="flex-shrink-0 mt-0.5">
                       <Icon
-                        className={`w-4 h-4 ${isActive ? "animate-spin" : ""}`}
-                        style={{ color: cfg.color }}
+                        className={`w-4 h-4 ${isActive && !isStuck ? "animate-spin" : ""}`}
+                        style={{ color: isStuck ? "#f59e0b" : cfg.color }}
                       />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <span
                           className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={{ background: `${cfg.color}22`, color: cfg.color }}
+                          style={{
+                            background: isStuck ? "#f59e0b22" : `${cfg.color}22`,
+                            color: isStuck ? "#f59e0b" : cfg.color,
+                          }}
                         >
-                          {label}
+                          {isStuck ? "⚠️ スタック" : label}
                         </span>
                         <span className="text-[10px]" style={{ color: "var(--muted)" }}>
                           {formatElapsed(job.createdAt)}
                         </span>
                       </div>
+                      {isStuck && (
+                        <p className="text-[10px] mb-1" style={{ color: "#f59e0b" }}>
+                          タイムアウトの可能性。中止して再試行してください
+                        </p>
+                      )}
                       <p className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>
                         {job.personaName ?? job.personaId} — {job.postType}
                       </p>
