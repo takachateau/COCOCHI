@@ -90,6 +90,35 @@ export default function ResultsPage() {
     } catch { /* ignore */ }
   }, [])
 
+  // ジョブ完了を検知して自動リフレッシュ
+  // アクティブなジョブが "done" になったタイミングで loadResults() を呼ぶ
+  useEffect(() => {
+    let prevActiveIds = new Set<string>()
+
+    const poll = async () => {
+      try {
+        const r = await fetch("/api/v4/jobs?limit=20")
+        const d = await r.json() as { jobs?: Array<{ id: string; status: string }> }
+        const jobs = d.jobs ?? []
+        const activeIds = new Set(
+          jobs
+            .filter(j => j.status === "pending" || j.status === "text_generating" || j.status === "image_generating")
+            .map(j => j.id)
+        )
+        // 前回アクティブだったジョブが今回アクティブでなくなった = 完了（done or error）
+        const justFinished = [...prevActiveIds].some(id => !activeIds.has(id))
+        if (justFinished) {
+          loadResults("active")
+        }
+        prevActiveIds = activeIds
+      } catch { /* silent */ }
+    }
+
+    poll() // 初回即時実行
+    const timer = setInterval(poll, 4000)
+    return () => clearInterval(timer)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   function switchMode(mode: "active" | "trash") {
     setViewMode(mode)
     loadResults(mode)

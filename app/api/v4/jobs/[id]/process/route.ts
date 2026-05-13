@@ -389,9 +389,12 @@ export async function POST(
 
     // 背景グループ対応: 同背景スライドをグループ化してベース画像を共有
     // 競合比較投稿は自動で全スライドを1グループ化（同一背景を強制）
+    // 背景グループは 商品比較投稿（product/mixed）のみに適用する
+    // tips投稿ではベンチマークのテキスト配置・スタイルを優先するためグループ化しない
     const rawBackgroundGroups = selectedBenchmark!.backgroundGroups as number[][] | null | undefined
-    const backgroundGroups = rawBackgroundGroups ??
-      (competitors.length > 0 ? [slides.map((_, i) => i)] : null)
+    const backgroundGroups = (jobPostType === "product" || jobPostType === "mixed")
+      ? (rawBackgroundGroups ?? (competitors.length > 0 ? [slides.map((_, i) => i)] : null))
+      : null
 
     const slideResults: SlideResult[] = new Array(slides.length)
 
