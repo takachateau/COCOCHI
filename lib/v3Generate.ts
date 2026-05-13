@@ -11,6 +11,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import type {
   Persona,
   BenchmarkPost,
+  SlideRole,
   HookType,
   StructureType,
   CompositionType,
@@ -158,9 +159,10 @@ export async function generateV3Post(params: {
   benchmarkSamples?: BenchmarkPost[]   // 同種別のベンチマーク投稿サンプル（構造を学ぶ）
   competitors?: CompetitorProduct[]    // product時の競合商品（比較型ベンチマークなら使う）
   targetSlideCount?: number            // ベンチマークの実際の枚数（必須厳守）
+  refSlideStructure?: SlideRole[]      // 選定ベンチマークのスライド構造（商品/非商品スロットを正確に配置するため）
   history?: string[]                   // 過去投稿タイトル一覧（被り防止プロンプト注入用）
 }): Promise<GeneratedPostText> {
-  const { persona, postType, product, types, benchmarkSamples, competitors, targetSlideCount, history } = params
+  const { persona, postType, product, types, benchmarkSamples, competitors, targetSlideCount, refSlideStructure, history } = params
 
   const hasCompetitors = !!(competitors && competitors.length > 0)
 
@@ -306,7 +308,31 @@ JSONのみ（前後に説明・コードブロック禁止）:
 ${targetSlideCount
   ? `【スライド枚数（絶対厳守）】${targetSlideCount}枚ちょうど。1枚でも多くても少なくてもNG。${
       (postType === "product" || postType === "mixed") && competitors && competitors.length > 0
-        ? `\n- 内訳（厳守）: フック1枚 + 競合商品${competitors.length}枚 + 自社商品(anetos)1枚 + CTA1枚 = ${targetSlideCount}枚\n- 順番: フック → 競合[1〜${competitors.length}] → 自社(anetos)[${competitors.length + 1}つ目] → CTA\n- 渡された競合商品リスト（${competitors.length}件）を過不足なく全て使い、その後に必ず自社商品スライドを置くこと`
+        ? (() => {
+            // ベンチマークの slideStructure がある場合: スロット別の厳密な内訳を生成
+            const PRODUCT_KW = ["商品", "item", "アイテム", "product"]
+            const isProductRole = (role: string) => PRODUCT_KW.some(kw => role.toLowerCase().includes(kw))
+
+            if (refSlideStructure && refSlideStructure.length > 0) {
+              const productSlots = refSlideStructure.filter(s => isProductRole(s.role))
+              const lines = refSlideStructure.map(s => {
+                if (!isProductRole(s.role)) {
+                  return `  ${s.slide}枚目: 【${s.role}】— ベンチマーク通りの非商品スライド（削除・省略・変更禁止）`
+                }
+                const pIdx = productSlots.findIndex(p => p.slide === s.slide)
+                if (pIdx === productSlots.length - 1) {
+                  // 最後の商品スロット = 自社商品
+                  return `  ${s.slide}枚目: 【自社商品（anetos）${pIdx + 1}つ目】— "${product?.name ?? "anetos"}" の独立スライド`
+                }
+                const c = competitors[pIdx]
+                return `  ${s.slide}枚目: 【競合商品 ${pIdx + 1}つ目】— ${c ? `"${c.brandName} ${c.productName}"` : `商品リスト[C${pIdx + 1}]`}`
+              })
+              return `\n- 内訳（ベンチマーク構造を完全厳守）:\n${lines.join("\n")}\n- 非商品スライドの役割・枚数・位置をベンチマーク通りに維持（絶対に削除・追加・移動しない）\n- 競合商品 ${competitors.length}件は上記スロット通りに配置し、全件使い切ること`
+            }
+
+            // fallback: slideStructure なし → シンプル内訳（旧来）
+            return `\n- 内訳（厳守）: フック1枚 + 競合商品${competitors.length}枚 + 自社商品(anetos)1枚 + CTA1枚 = ${targetSlideCount}枚\n- 順番: フック → 競合[1〜${competitors.length}] → 自社(anetos)[${competitors.length + 1}つ目] → CTA\n- 渡された競合商品リスト（${competitors.length}件）を過不足なく全て使い、その後に必ず自社商品スライドを置くこと`
+          })()
         : ""
     }`
   : `スライド枚数の目安:

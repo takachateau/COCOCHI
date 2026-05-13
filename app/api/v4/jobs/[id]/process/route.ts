@@ -302,11 +302,26 @@ export async function POST(
     const recentPosts = await dbLoadRecentPostsByPersona(job.personaId, 30).catch(() => [])
     const history = recentPosts.map(p => p.overallTitle)
 
-    // ベンチマーク枚数に合わせて競合件数を制限: hook(1) + 自社(1) + CTA(1) = 3固定スロット
-    const maxCompetitors = targetSlideCount !== undefined ? Math.max(0, targetSlideCount - 3) : competitors.length
+    // ベンチマークの slideStructure から商品スロット数を正確に取得して競合件数を制限
+    // 役割に「商品」を含むスライドを商品スロットと判定し、-1（自社商品1枚分）が最大競合件数
+    // slideStructure が空の場合: 旧来の targetSlideCount - 3 にフォールバック
+    const benchmarkStructure = selectedBenchmark?.slideStructure ?? []
+    const isProductRole = (role: string) =>
+      ["商品", "item", "アイテム", "product"].some(kw => role.toLowerCase().includes(kw))
+    const benchmarkProductSlots = benchmarkStructure.filter(s => isProductRole(s.role)).length
+    const maxCompetitors = targetSlideCount !== undefined
+      ? benchmarkProductSlots > 0
+        ? Math.max(0, benchmarkProductSlots - 1)   // 正確: 商品スロット数 − 自社1枚
+        : Math.max(0, targetSlideCount - 3)         // fallback: フック+自社+CTA = 3固定
+      : competitors.length
     const trimmedCompetitors = competitors.slice(0, maxCompetitors)
 
-    const generateParams = { persona, postType: job.postType as PostType, product, types, benchmarkSamples, competitors: trimmedCompetitors, targetSlideCount, history }
+    const generateParams = {
+      persona, postType: job.postType as PostType, product, types, benchmarkSamples,
+      competitors: trimmedCompetitors, targetSlideCount,
+      refSlideStructure: benchmarkStructure.length > 0 ? benchmarkStructure : undefined,
+      history,
+    }
     let generated = await generateV3Post(generateParams)
     for (let attempt = 0; attempt < 2; attempt++) {
       const duplicate = await isDuplicatePost(generated.overallTitle, history)
