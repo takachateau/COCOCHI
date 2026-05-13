@@ -276,6 +276,12 @@ export default function GeneratePage() {
       }).catch(() => { /* エラーはステータスポーリングで検知 */ })
 
       await new Promise<void>((resolve, reject) => {
+        // 9分でタイムアウト（maxDuration=300秒 + バッファ）
+        const timeout = setTimeout(() => {
+          clearInterval(poll)
+          reject(new Error("タイムアウト: 生成処理に時間がかかっています。ページをリロードして管理画面を確認してください。"))
+        }, 9 * 60 * 1000)
+
         const poll = setInterval(async () => {
           try {
             const r = await fetch(`/api/generate/status/${jobId}`)
@@ -292,8 +298,17 @@ export default function GeneratePage() {
             setCompletedSlides(d.completedSlides)
             setTotalSlides(d.totalSlides)
             if (d.startTime) setStartTime(d.startTime)
-            if (d.status === "done") { clearInterval(poll); setGroup(d.group!); resolve() }
-            else if (d.status === "error") { clearInterval(poll); reject(new Error(d.error ?? "生成エラー")) }
+            if (d.status === "done") {
+              clearInterval(poll)
+              clearTimeout(timeout)
+              if (!d.group) { reject(new Error("生成結果を取得できませんでした。もう一度お試しください。")); return }
+              setGroup(d.group)
+              resolve()
+            } else if (d.status === "error") {
+              clearInterval(poll)
+              clearTimeout(timeout)
+              reject(new Error(d.error ?? "生成エラー"))
+            }
           } catch { /* 一時失敗は無視 */ }
         }, 3000)
       })

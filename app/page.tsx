@@ -674,6 +674,24 @@ export default function Dashboard() {
               <Package className="w-4 h-4" />
               <span className="hidden sm:inline">商品管理</span>
             </Link>
+            {/* バージョン切替 */}
+            <div className="flex rounded-lg overflow-hidden flex-shrink-0" style={{ border: "1px solid var(--border)" }}>
+              <Link
+                href="/"
+                className="px-3 py-2 text-xs font-bold"
+                style={{ background: "var(--accent)", color: "white" }}
+              >V1</Link>
+              <Link
+                href="/v2/plan"
+                className="px-3 py-2 text-xs font-bold transition-opacity hover:opacity-80"
+                style={{ background: "var(--card)", color: "var(--text)", borderLeft: "1px solid var(--border)" }}
+              >V2</Link>
+              <Link
+                href="/v3/plan"
+                className="px-3 py-2 text-xs font-bold transition-opacity hover:opacity-80"
+                style={{ background: "var(--card)", color: "var(--text)", borderLeft: "1px solid var(--border)" }}
+              >V3</Link>
+            </div>
             <Link
               href="/generate"
               className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-sm font-bold text-white transition-opacity hover:opacity-85"

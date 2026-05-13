@@ -7,6 +7,7 @@
  */
 
 import { put, list } from "@vercel/blob"
+import type { PostGroup } from "@/types"
 
 export type JobStatus = "pending" | "generating" | "done" | "error"
 
@@ -16,7 +17,8 @@ export interface Job {
   progress: string
   completedSlides: number
   totalSlides: number
-  groupId?: string   // done時: 生成済みPostGroupのID（フル画像データはgroupsに保存済み）
+  groupId?: string      // done時: 生成済みPostGroupのID
+  resultGroup?: PostGroup // done時: 画像アップロード済みのグループデータ（Blob URL付き）
   error?: string
   createdAt: number
   startTime?: number

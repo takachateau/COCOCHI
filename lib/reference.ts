@@ -46,7 +46,7 @@ function loadMetadata(): Metadata {
 }
 
 function claude() {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  return new Anthropic({ apiKey: process.env.COCOCHI_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY })
 }
 
 // ─── 1. ムード判定 ────────────────────────────────────────────────

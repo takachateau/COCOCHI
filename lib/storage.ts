@@ -46,8 +46,12 @@ export async function updateGroup(id: string, updated: PostGroup): Promise<void>
   await saveGroupsToBlob(groups)
 }
 
-export async function saveGroup(group: PostGroup): Promise<PostGroup> {
-  // 商品画像を永続BlobにアップロードしてURLを保存（再生成用）
+/**
+ * 画像を Blob にアップロードし、Blob URL を持つ PostGroup を返す。
+ * groups.json への追記は行わない。
+ * processJob から呼ばれ、完了後すぐに job を "done" にするために分離。
+ */
+export async function uploadGroupImages(group: PostGroup): Promise<PostGroup> {
   let productImageUrl = group.productImageUrl
   if (!productImageUrl && group.productImageBase64) {
     try {
@@ -64,9 +68,9 @@ export async function saveGroup(group: PostGroup): Promise<PostGroup> {
     }
   }
 
-  const saved: PostGroup = {
+  return {
     ...group,
-    productImageBase64: "",  // 大きすぎるので保存しない
+    productImageBase64: "",
     productImageUrl,
     posts: await Promise.all(group.posts.map(async post => ({
       ...post,
@@ -85,11 +89,35 @@ export async function saveGroup(group: PostGroup): Promise<PostGroup> {
       })),
     }))),
   }
+}
 
+// ─── v2: スライドBufferをBlobにアップロードしてURL配列を返す ────
+
+export async function uploadSlideBuffers(buffers: Buffer[]): Promise<string[]> {
+  const ts = Date.now()
+  return Promise.all(
+    buffers.map(async (buf, i) => {
+      const { url } = await put(
+        `cocochi/v2/slides/${ts}_${String(i + 1).padStart(2, "0")}.jpg`,
+        buf,
+        { access: "public", contentType: "image/jpeg", addRandomSuffix: true },
+      )
+      return url
+    })
+  )
+}
+
+/** groups.json にグループを追記する（uploadGroupImages の後に fire-and-forget で呼ぶ）。 */
+export async function appendToGroups(group: PostGroup): Promise<void> {
   const groups = await loadGroupsFromBlob()
-  groups.unshift(saved)
+  groups.unshift(group)
   await saveGroupsToBlob(groups)
+}
 
+/** uploadGroupImages + appendToGroups を一括で行う（再生成・管理画面等の既存コードから使用）。 */
+export async function saveGroup(group: PostGroup): Promise<PostGroup> {
+  const saved = await uploadGroupImages(group)
+  await appendToGroups(saved)
   return saved
 }
 
