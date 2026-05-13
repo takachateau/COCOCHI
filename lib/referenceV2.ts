@@ -262,3 +262,74 @@ export async function describeV2StyleFromUrl(imageUrl: string): Promise<string> 
     return ""
   }
 }
+
+// ─── 同背景グループ検出 ────────────────────────────────────────
+
+/**
+ * ベンチマーク投稿の全スライドを Claude Vision で分析し、
+ * 同じ背景（写真背景・シーン）を共有するスライドをグループ化する。
+ *
+ * @returns number[][] — 各要素が1グループ。値はスライドの 0-based インデックス。
+ * 例: [[0], [1,2,3,4,5,6,7], [8]] = スライド2〜8（0-indexed: 1〜7）が同背景
+ */
+export async function detectBackgroundGroups(slideUrls: string[]): Promise<number[][]> {
+  if (slideUrls.length === 0) return []
+  if (slideUrls.length === 1) return [[0]]
+
+  const imageBlocks = slideUrls.map(url => ({
+    type: "image" as const,
+    source: { type: "url" as const, url },
+  }))
+
+  try {
+    const res = await claude().messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 256,
+      messages: [{
+        role: "user",
+        content: [
+          ...imageBlocks,
+          {
+            type: "text",
+            text: `You are analyzing ${slideUrls.length} slides from a Lemon8/Instagram carousel post.
+
+Task: Identify which slides share the EXACT SAME photographic background (same scene, same environment, same lighting setup).
+
+Rules:
+- Ignore text overlays, product images, and graphic elements — focus only on the background photo/scene
+- Slides that were taken in the same location at the same time = same group
+- The hook slide (slide 1) and CTA/last slide often have different backgrounds from the middle slides
+- Middle "content" slides (2 to N-1) often share the same background
+
+Return ONLY a JSON array of arrays. Each inner array contains the 0-based indices of slides that share the same background.
+Example response: [[0],[1,2,3,4,5],[6]]
+
+Slides are numbered 0 to ${slideUrls.length - 1} (left to right in the order shown).
+Return JSON only, no explanation:`,
+          },
+        ],
+      }],
+    })
+
+    const raw = res.content[0].type === "text" ? res.content[0].text.trim() : "[]"
+    const jsonText = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
+    const parsed = JSON.parse(jsonText) as number[][]
+
+    // バリデーション: 全インデックスが含まれているか確認し、漏れを補完
+    const covered = new Set(parsed.flat())
+    const missing: number[] = []
+    for (let i = 0; i < slideUrls.length; i++) {
+      if (!covered.has(i)) missing.push(i)
+    }
+    // 漏れたものは個別グループとして追加
+    const result = [...parsed, ...missing.map(i => [i])]
+    // インデックス順にソートして返す
+    return result.sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0))
+  } catch (e) {
+    console.warn("[referenceV2] detectBackgroundGroups 失敗、フォールバック:", e)
+    // フォールバック: 先頭・末尾は単独、中間は1グループ
+    if (slideUrls.length <= 2) return slideUrls.map((_, i) => [i])
+    const middle = Array.from({ length: slideUrls.length - 2 }, (_, i) => i + 1)
+    return [[0], middle, [slideUrls.length - 1]]
+  }
+}

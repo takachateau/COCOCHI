@@ -287,6 +287,14 @@ export async function dbUpdateBenchmarkSlideStyleDescs(
   if (error) throw new Error(`BenchmarkPost slideStyleDescs update error: ${error.message}`)
 }
 
+export async function dbUpdateBackgroundGroups(id: string, groups: number[][]): Promise<void> {
+  const { error } = await supabase
+    .from("benchmark_posts")
+    .update({ background_groups: groups })
+    .eq("id", id)
+  if (error) throw new Error(`BackgroundGroups update error: ${error.message}`)
+}
+
 export async function dbRenameAccount(oldName: string, newName: string): Promise<void> {
   const { error } = await supabase
     .from("benchmark_posts")
@@ -346,7 +354,8 @@ function rowToBenchmarkPost(row: Record<string, unknown>): BenchmarkPost {
     structureType:   (row.structure_type   as BenchmarkPost["structureType"])   ?? null,
     compositionType: (row.composition_type as BenchmarkPost["compositionType"]) ?? null,
     patternNotes:    (row.pattern_notes    as BenchmarkPost["patternNotes"])    ?? null,
-    isHidden:        (row.is_hidden as boolean) ?? false,
+    isHidden:         (row.is_hidden as boolean) ?? false,
+    backgroundGroups: (row.background_groups as number[][] | null) ?? null,
   }
 }
 

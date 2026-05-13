@@ -84,6 +84,13 @@ export default function BenchmarkPage() {
   // ─── アカウントレベル非表示 ───
   const [accountHiddenMap, setAccountHiddenMap] = useState<Record<string, boolean>>({})
 
+  // ─── 背景グループ設定 ───
+  const [bgGroupState, setBgGroupState] = useState<{ postId: string; slideUrls: string[]; groups: number[][] } | null>(null)
+  const [bgGroupDetecting, setBgGroupDetecting] = useState<string | null>(null)
+  const [bgGroupSaving, setBgGroupSaving] = useState(false)
+
+  const BG_GROUP_COLORS = ["#f59e0b","#3b82f6","#10b981","#8b5cf6","#f43f5e","#0891b2"]
+
   const CAPTION_MAX_LENGTH = 5000
 
   useEffect(() => {
@@ -158,6 +165,64 @@ export default function BenchmarkPage() {
       setPosts(prev => prev.map(p => p.id === id ? { ...p, isHidden: !currentHidden } : p))
     } catch (e) {
       alert(e instanceof Error ? e.message : "非表示設定に失敗しました")
+    }
+  }
+
+  async function handleDetectBgGroups(post: BenchmarkPost) {
+    setBgGroupDetecting(post.id)
+    try {
+      const r = await fetch("/api/v4/benchmark/detect-bg-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ benchmarkPostId: post.id }),
+      })
+      const d = await r.json() as { groups?: number[][]; error?: string }
+      if (d.error) throw new Error(d.error)
+      setBgGroupState({ postId: post.id, slideUrls: post.slideUrls, groups: d.groups! })
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "背景グループ検出に失敗しました")
+    } finally {
+      setBgGroupDetecting(null)
+    }
+  }
+
+  function cycleSlideGroup(slideIndex: number) {
+    if (!bgGroupState) return
+    const currentGroup = bgGroupState.groups.findIndex(g => g.includes(slideIndex))
+    const numGroups = bgGroupState.groups.length
+    // 次のグループへ（最後 → 新規グループ作成、グループが6以上なら先頭に戻る）
+    const nextGroup = numGroups < 6 ? (currentGroup + 1) % (numGroups + 1) : (currentGroup + 1) % numGroups
+
+    const filtered = bgGroupState.groups
+      .map(g => g.filter(i => i !== slideIndex))
+      .filter(g => g.length > 0)
+      .sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0))
+
+    if (nextGroup < filtered.length) {
+      filtered[nextGroup] = [...filtered[nextGroup], slideIndex].sort((a, b) => a - b)
+    } else {
+      filtered.push([slideIndex])
+    }
+    setBgGroupState(prev => prev ? { ...prev, groups: filtered } : null)
+  }
+
+  async function saveBgGroups() {
+    if (!bgGroupState) return
+    setBgGroupSaving(true)
+    try {
+      await fetch("/api/v4/benchmark/save-bg-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ benchmarkPostId: bgGroupState.postId, groups: bgGroupState.groups }),
+      })
+      setPosts(prev => prev.map(p =>
+        p.id === bgGroupState.postId ? { ...p, backgroundGroups: bgGroupState.groups } : p
+      ))
+      setBgGroupState(null)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "保存に失敗しました")
+    } finally {
+      setBgGroupSaving(false)
     }
   }
 
@@ -816,6 +881,106 @@ export default function BenchmarkPage() {
         </div>
       )}
 
+      {/* ─── 背景グループ確認モーダル ─── */}
+      {bgGroupState && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.85)" }}
+          onClick={() => setBgGroupState(null)}
+        >
+          <div
+            className="relative w-full rounded-2xl overflow-y-auto p-6 space-y-5"
+            style={{ maxWidth: 680, maxHeight: "90vh", background: "var(--card)", border: "1px solid var(--border)" }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-base" style={{ color: "var(--text)" }}>同背景グループの確認</h3>
+                <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
+                  スライドをクリックするとグループを変更できます。同じ色 = 同じ背景グループ
+                </p>
+              </div>
+              <button
+                onClick={() => setBgGroupState(null)}
+                className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-70"
+                style={{ background: "var(--bg)", color: "var(--muted)" }}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 凡例 */}
+            <div className="flex gap-2 flex-wrap">
+              {bgGroupState.groups.map((group, gi) => (
+                <div key={gi} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold text-white"
+                  style={{ background: BG_GROUP_COLORS[gi % BG_GROUP_COLORS.length] }}>
+                  グループ {gi + 1}
+                  <span className="opacity-75">({group.length}枚)</span>
+                </div>
+              ))}
+            </div>
+
+            {/* スライドグリッド */}
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+              {bgGroupState.slideUrls.map((url, si) => {
+                const gi = bgGroupState.groups.findIndex(g => g.includes(si))
+                const color = gi >= 0 ? BG_GROUP_COLORS[gi % BG_GROUP_COLORS.length] : "#6b7280"
+                return (
+                  <button
+                    key={si}
+                    onClick={() => cycleSlideGroup(si)}
+                    className="relative rounded-xl overflow-hidden transition-all hover:scale-105"
+                    style={{ border: `3px solid ${color}` }}
+                    title={`スライド${si + 1} — クリックでグループ変更`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="" className="w-full aspect-[3/4] object-cover" />
+                    {/* グループバッジ */}
+                    <div
+                      className="absolute bottom-0 left-0 right-0 text-center text-[10px] font-bold text-white py-0.5"
+                      style={{ background: color }}
+                    >
+                      {gi >= 0 ? `G${gi + 1}` : "?"}
+                    </div>
+                    {/* スライド番号 */}
+                    <div className="absolute top-1 left-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                      style={{ background: "rgba(0,0,0,0.6)" }}>
+                      {si + 1}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+
+            <p className="text-xs" style={{ color: "var(--muted)" }}>
+              ※ グループが1枚のスライドは「独立背景」として扱われます。2枚目以降の同グループスライドは最初のスライドの背景を引き継いで生成されます。
+            </p>
+
+            {/* ボタン行 */}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setBgGroupState(null)}
+                className="px-4 py-2 rounded-xl text-sm font-bold transition-opacity hover:opacity-70"
+                style={{ color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)" }}
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={saveBgGroups}
+                disabled={bgGroupSaving}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-50"
+                style={{ background: "var(--accent)" }}
+              >
+                {bgGroupSaving
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />保存中...</>
+                  : <><CheckCircle2 className="w-4 h-4" />確定して保存</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── 一覧ビュー ─── */}
       {view === "list" && (
         <div className="space-y-5">
@@ -982,6 +1147,20 @@ export default function BenchmarkPage() {
                           title={p.isHidden ? "表示に戻す" : "非表示にする（ペルソナ生成から除外）"}
                         >
                           {p.isHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        </button>
+                        {/* 背景グループ検出ボタン */}
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDetectBgGroups(p) }}
+                          disabled={bgGroupDetecting === p.id}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg shadow-md text-xs font-bold"
+                          style={{ background: "rgba(255,255,255,0.95)", color: p.backgroundGroups ? "#10b981" : "#6b7280" }}
+                          title={p.backgroundGroups ? "同背景グループ（設定済み）- クリックで再検出" : "同背景グループを検出"}
+                        >
+                          {bgGroupDetecting === p.id ? (
+                            <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <span style={{ fontSize: 11 }}>{p.backgroundGroups ? "✓BG" : "BG"}</span>
+                          )}
                         </button>
                         {/* 削除ボタン */}
                         <button

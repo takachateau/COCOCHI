@@ -516,6 +516,7 @@ export interface V2SlideParams {
     photoStyle: string
   }
   slideNumber?: number         // スライド番号（01など）
+  instruction?: string         // ユーザー追加指示（再生成時の修正内容など）
 }
 
 /**
