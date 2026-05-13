@@ -169,11 +169,30 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                         {t.queue.clickToView}
                       </p>
                     )}
-                    {isDone && job.imageCost && (
-                      <p className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>
-                        {job.imageCost.jpy} / {job.imageCost.usd}
-                      </p>
-                    )}
+                    {isDone && (() => {
+                      // DB保存されたコスト or スライド数から推定
+                      const cost = job.imageCost
+                      if (cost) {
+                        return (
+                          <p className="text-[11px] font-medium mt-0.5" style={{ color: "var(--accent)" }}>
+                            💴 {cost.jpy} / {cost.usd}
+                          </p>
+                        )
+                      }
+                      // フォールバック: スライド数から推定（DB保存前の旧ジョブ用）
+                      const successCount = (job.imageUrls ?? []).filter(Boolean).length
+                      if (successCount > 0) {
+                        const hasProduct = job.postType === "product" || job.postType === "mixed"
+                        const perCall = hasProduct ? 0.06 : 0.04
+                        const estimatedJpy = Math.round(successCount * perCall * 155)
+                        return (
+                          <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
+                            💴 約¥{estimatedJpy}〜（推定）
+                          </p>
+                        )
+                      }
+                      return null
+                    })()}
                   </div>
                   {isDone && job.imageUrls && (
                     <div className="flex-shrink-0">
