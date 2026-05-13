@@ -1,12 +1,11 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Clock, Image as ImageIcon, Trash2, ChevronLeft, ChevronRight, X, ChevronDown, ChevronUp, MoveRight, RefreshCw, ArchiveRestore, ArrowLeft } from "lucide-react"
+import { Clock, Image as ImageIcon, Trash2, ChevronLeft, ChevronRight, X, MoveRight, RefreshCw, ArchiveRestore, ArrowLeft, PenLine, Send } from "lucide-react"
 import type { PostType, GeneratedPost, GeneratedSlide, HookType, StructureType, CompositionType } from "@/types/v2"
 import { useLanguage } from "@/context/language"
 import { useT } from "@/lib/i18n"
 
-// ─── 旧 localStorage 形式（移行用）────────────────────────────────
 const OLD_STORAGE_KEY = "cocochi_v3_results"
 interface OldSavedResult {
   personaId: string
@@ -39,22 +38,20 @@ export default function ResultsPage() {
     product: r_.postTypes.product,
     mixed:   r_.postTypes.mixed,
   }
-  const [results, setResults]         = useState<GeneratedPost[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [localCount, setLocalCount]   = useState(0)
-  const [migrating, setMigrating]     = useState(false)
-  const [migrateMsg, setMigrateMsg]   = useState("")
-  const [filterType, setFilterType]   = useState<PostType | "all">("all")
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
-  const [modal, setModal]             = useState<{ result: GeneratedPost; idx: number } | null>(null)
-  const [viewMode, setViewMode]       = useState<"active" | "trash">("active")
-  // key = "${postId}_${slideIndex}"
+
+  const [results, setResults]       = useState<GeneratedPost[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [localCount, setLocalCount] = useState(0)
+  const [migrating, setMigrating]   = useState(false)
+  const [migrateMsg, setMigrateMsg] = useState("")
+  const [filterType, setFilterType] = useState<PostType | "all">("all")
+  const [modal, setModal]           = useState<{ result: GeneratedPost; idx: number } | null>(null)
+  const [viewMode, setViewMode]     = useState<"active" | "trash">("active")
   const [regenLoading, setRegenLoading] = useState<Record<string, boolean>>({})
   const [regenError, setRegenError]     = useState<string | null>(null)
-  // per-slide instruction inputs
   const [slideInstructions, setSlideInstructions] = useState<Record<string, string>>({})
-  // per-slide text edits
-  const [editedSlides, setEditedSlides] = useState<EditMap>({})
+  const [editedSlides, setEditedSlides]           = useState<EditMap>({})
+  const [captionOpen, setCaptionOpen]             = useState(false)
 
   function getEffectiveSlide(result: GeneratedPost, si: number): GeneratedSlide {
     const key  = `${result.id}_${si}`
@@ -68,7 +65,7 @@ export default function ResultsPage() {
       bullets:  edit.bullets !== undefined
         ? edit.bullets.split("\n").map(s => s.trim()).filter(Boolean)
         : base.bullets,
-      accent:   edit.accent !== undefined ? edit.accent : base.accent,
+      accent: edit.accent !== undefined ? edit.accent : base.accent,
     }
   }
 
@@ -77,16 +74,8 @@ export default function ResultsPage() {
     try {
       const url = mode === "trash" ? "/api/v4/generated-posts?trash=1" : "/api/v4/generated-posts"
       const r = await fetch(url)
-      const d = await r.json() as {
-        posts?: GeneratedPost[]
-        error?: string
-        _debug?: { trash?: boolean; dbPostsCount: number; doneJobsCount: number; mergedCount: number; dbError: string | null; jobsError: string | null }
-      }
-      if (d._debug) {
-        console.log("[results] _debug:", d._debug)
-        if (d._debug.dbError)   console.error("[results] DBエラー:", d._debug.dbError)
-        if (d._debug.jobsError) console.error("[results] Jobsエラー:", d._debug.jobsError)
-      }
+      const d = await r.json() as { posts?: GeneratedPost[]; error?: string; _debug?: unknown }
+      if (d._debug) console.log("[results] _debug:", d._debug)
       setResults(d.posts ?? [])
     } finally {
       setLoading(false)
@@ -103,7 +92,6 @@ export default function ResultsPage() {
 
   function switchMode(mode: "active" | "trash") {
     setViewMode(mode)
-    setExpandedIds(new Set())
     loadResults(mode)
   }
 
@@ -119,17 +107,11 @@ export default function ResultsPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              personaId:       item.personaId,
-              postType:        item.postType,
-              productId:       item.productId ?? null,
-              overallTitle:    item.generated.overallTitle,
-              slides:          item.generated.slides,
-              caption:         item.generated.caption,
-              hookType:        item.types.hookType,
-              structureType:   item.types.structureType,
-              compositionType: item.types.compositionType,
-              refBenchmark:    item.refBenchmark ?? null,
-              imageUrls:       item.imageUrls,
+              personaId: item.personaId, postType: item.postType, productId: item.productId ?? null,
+              overallTitle: item.generated.overallTitle, slides: item.generated.slides,
+              caption: item.generated.caption, hookType: item.types.hookType,
+              structureType: item.types.structureType, compositionType: item.types.compositionType,
+              refBenchmark: item.refBenchmark ?? null, imageUrls: item.imageUrls,
             }),
           })
           if (r.ok) { ok++ } else { fail++ }
@@ -146,7 +128,11 @@ export default function ResultsPage() {
     }
   }
 
-  const closeModal = useCallback(() => setModal(null), [])
+  const closeModal = useCallback(() => {
+    setModal(null)
+    setCaptionOpen(false)
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!modal) return
@@ -160,7 +146,6 @@ export default function ResultsPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [modal, closeModal])
 
-  // 同期再生成（直接 regenerate-slide API を呼ぶ）
   async function handleRegenSlide(result: GeneratedPost, slideIndex: number) {
     const key = `${result.id}_${slideIndex}`
     setRegenLoading(prev => ({ ...prev, [key]: true }))
@@ -172,34 +157,29 @@ export default function ResultsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          slide:               effectiveSlide,
-          personaId:           result.personaId,
-          postType:            result.postType,
-          productId:           result.productId ?? undefined,
-          types:               result.hookType && result.structureType && result.compositionType
+          slide: effectiveSlide, personaId: result.personaId, postType: result.postType,
+          productId: result.productId ?? undefined,
+          types: result.hookType && result.structureType && result.compositionType
             ? { hookType: result.hookType, structureType: result.structureType, compositionType: result.compositionType }
             : undefined,
-          slideIndex,
-          benchmarkFolderPath: result.refBenchmark ?? undefined,
-          instruction,
+          slideIndex, benchmarkFolderPath: result.refBenchmark ?? undefined, instruction,
         }),
       })
       const d = await r.json() as { imageUrl?: string; error?: string }
       if (!r.ok || d.error) throw new Error(d.error ?? "再生成失敗")
       if (!d.imageUrl) throw new Error("再生成後の画像URLが取得できませんでした")
-
       setResults(prev => prev.map(p => {
         if (p.id !== result.id) return p
-        const newUrls = [...p.imageUrls]
-        newUrls[slideIndex] = d.imageUrl!
+        const newUrls = [...p.imageUrls]; newUrls[slideIndex] = d.imageUrl!
         return { ...p, imageUrls: newUrls }
       }))
       setModal(prev => {
         if (!prev || prev.result.id !== result.id) return prev
-        const newUrls = [...prev.result.imageUrls]
-        newUrls[slideIndex] = d.imageUrl!
+        const newUrls = [...prev.result.imageUrls]; newUrls[slideIndex] = d.imageUrl!
         return { ...prev, result: { ...prev.result, imageUrls: newUrls } }
       })
+      // clear instruction after successful regen
+      setSlideInstructions(prev => { const next = { ...prev }; delete next[key]; return next })
     } catch (e) {
       setRegenError(e instanceof Error ? e.message : "再生成失敗")
     } finally {
@@ -210,33 +190,41 @@ export default function ResultsPage() {
   async function handleDelete(id: string) {
     if (!confirm(r_.confirmTrash)) return
     const r = await fetch(`/api/v4/generated-posts?id=${id}`, { method: "DELETE" })
-    if (r.ok) setResults(prev => prev.filter(p => p.id !== id))
+    if (r.ok) { setResults(prev => prev.filter(p => p.id !== id)); if (modal?.result.id === id) closeModal() }
   }
-
   async function handleRestore(id: string) {
     const r = await fetch(`/api/v4/generated-posts?id=${id}&restore=1`, { method: "PATCH" })
     if (r.ok) setResults(prev => prev.filter(p => p.id !== id))
   }
-
   async function handlePurge(id: string) {
     if (!confirm(r_.confirmPermanentDelete)) return
     const r = await fetch(`/api/v4/generated-posts?id=${id}&purge=1`, { method: "DELETE" })
-    if (r.ok) setResults(prev => prev.filter(p => p.id !== id))
-  }
-
-  function toggleExpand(id: string) {
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
+    if (r.ok) { setResults(prev => prev.filter(p => p.id !== id)); if (modal?.result.id === id) closeModal() }
   }
 
   const filtered = filterType === "all" ? results : results.filter(r => r.postType === filterType)
 
+  // ─── MODAL helpers ───────────────────────────────────────────────
+  const modalSlide   = modal ? (modal.result.slides[modal.idx] ?? null) : null
+  const modalKey     = modal ? `${modal.result.id}_${modal.idx}` : ""
+  const modalEdit    = modal ? (editedSlides[modalKey] ?? {}) : {}
+  const modalInstr   = modal ? (slideInstructions[modalKey] ?? "") : ""
+  const modalIsRegen = modal ? !!regenLoading[modalKey] : false
+  const modalHasEdit = modal ? !!(modalEdit.tag || modalEdit.headline || modalEdit.bullets !== undefined || modalEdit.accent !== undefined) : false
+
+  function setModalField(field: keyof EditMap[string], value: string) {
+    if (!modal) return
+    setEditedSlides(prev => ({ ...prev, [modalKey]: { ...prev[modalKey], [field]: value } }))
+  }
+  function setModalInstr(v: string) {
+    if (!modal) return
+    setSlideInstructions(prev => ({ ...prev, [modalKey]: v }))
+  }
+
   return (
     <div className="space-y-6">
 
+      {/* ─── ページヘッダー ─── */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>
@@ -247,22 +235,16 @@ export default function ResultsPage() {
           </p>
         </div>
         {viewMode === "active" ? (
-          <button
-            onClick={() => switchMode("trash")}
+          <button onClick={() => switchMode("trash")}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}
-          >
-            <Trash2 className="w-4 h-4" />
-            {r_.trashTitle}
+            style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}>
+            <Trash2 className="w-4 h-4" />{r_.trashTitle}
           </button>
         ) : (
-          <button
-            onClick={() => switchMode("active")}
+          <button onClick={() => switchMode("active")}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}
-          >
-            <ArrowLeft className="w-4 h-4" />
-            {r_.backToList}
+            style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}>
+            <ArrowLeft className="w-4 h-4" />{r_.backToList}
           </button>
         )}
       </div>
@@ -275,22 +257,17 @@ export default function ResultsPage() {
             <p className="text-sm font-bold" style={{ color: "#92400e" }}>ブラウザに{localCount}件の旧データがあります</p>
             <p className="text-xs mt-0.5" style={{ color: "#78350f" }}>以前の生成結果をDBに移行します（移行後は削除されます）</p>
           </div>
-          <button
-            onClick={migrateFromLocalStorage}
-            disabled={migrating}
+          <button onClick={migrateFromLocalStorage} disabled={migrating}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-50"
-            style={{ background: "#f59e0b" }}
-          >
-            {migrating
-              ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              : <MoveRight className="w-4 h-4" />}
+            style={{ background: "#f59e0b" }}>
+            {migrating ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <MoveRight className="w-4 h-4" />}
             {migrating ? r_.migrating : r_.migrateBtn}
           </button>
         </div>
       )}
       {migrateMsg && <p className="text-sm font-medium" style={{ color: "var(--accent)" }}>{migrateMsg}</p>}
 
-      {/* 再生成エラー通知 */}
+      {/* 再生成エラー */}
       {regenError && (
         <div className="rounded-xl px-4 py-3 flex items-center gap-3"
           style={{ background: "#ef444422", border: "1px solid #ef4444" }}>
@@ -302,16 +279,11 @@ export default function ResultsPage() {
       {/* フィルター */}
       <div className="flex gap-2 flex-wrap" suppressHydrationWarning>
         {(["all", "tips", "product", "mixed"] as const).map(type => (
-          <button
-            key={type}
-            onClick={() => setFilterType(type)}
+          <button key={type} onClick={() => setFilterType(type)}
             className="px-3 py-1.5 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={
-              filterType === type
-                ? { background: "var(--accent)", color: "white" }
-                : { background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }
-            }
-          >
+            style={filterType === type
+              ? { background: "var(--accent)", color: "white" }
+              : { background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}>
             {type === "all" ? `すべて（${results.length}件）` : POST_TYPE_LABELS[type]}
           </button>
         ))}
@@ -333,16 +305,13 @@ export default function ResultsPage() {
         </div>
       )}
 
-      {/* 結果一覧 */}
+      {/* ─── 結果カード一覧 ─── */}
       <div className="space-y-4">
         {filtered.map(result => {
-          const ptColor    = POST_TYPE_COLORS[result.postType]
-          const isExpanded = expandedIds.has(result.id)
+          const ptColor = POST_TYPE_COLORS[result.postType]
           return (
             <div key={result.id} className="rounded-2xl overflow-hidden"
               style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-
-              {/* ─── カードヘッダー ─── */}
               <div className="p-4 space-y-3">
 
                 {/* タイトル行 */}
@@ -401,249 +370,324 @@ export default function ResultsPage() {
                   <span className="text-xs" style={{ color: "var(--muted)" }}>{result.imageUrls.filter(Boolean).length}{r_.imageCount}</span>
                 </div>
 
-                {/* スライドサムネイル（修正指示付き） */}
-                {result.imageUrls.length > 0 && (
-                  <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
+                {/* スライドサムネイル */}
+                {result.imageUrls.length > 0 ? (
+                  <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
                     {result.imageUrls.map((url, i) => {
                       if (!url) return null
-                      const slideKey = `${result.id}_${i}`
-                      const isRegen  = regenLoading[slideKey]
-                      const instr    = slideInstructions[slideKey] ?? ""
-                      const hasEdit  = !!editedSlides[slideKey]
+                      const hasEdit = !!editedSlides[`${result.id}_${i}`]
+                      const isRegen = !!regenLoading[`${result.id}_${i}`]
                       return (
-                        <div key={i} className="flex-shrink-0 flex flex-col gap-1" style={{ width: 88 }}>
-                          {/* 画像 */}
-                          <div className="relative group">
-                            <button onClick={() => setModal({ result, idx: i })} className="block w-full" title={`スライド ${i + 1} を拡大`}>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={url} alt={`slide ${i + 1}`}
-                                className="rounded-lg w-full transition-opacity group-hover:opacity-75 cursor-zoom-in"
-                                style={{ aspectRatio: "3/4", objectFit: "cover", border: "1px solid var(--border)" }}
-                              />
-                            </button>
-                            {/* スライド番号バッジ */}
-                            <span className="absolute bottom-1 left-1 text-white font-bold px-1 rounded pointer-events-none"
-                              style={{ background: "rgba(0,0,0,0.55)", fontSize: 10 }}>
-                              {i + 1}
-                            </span>
-                            {/* 編集済みバッジ */}
-                            {hasEdit && (
-                              <span className="absolute top-1 left-1 px-1 rounded font-bold pointer-events-none"
-                                style={{ background: "#f59e0b", color: "white", fontSize: 9, lineHeight: "14px" }}>✏</span>
-                            )}
-                            {/* 再生成ボタン */}
-                            <button
-                              onClick={e => { e.stopPropagation(); handleRegenSlide(result, i) }}
-                              disabled={isRegen}
-                              title={`スライド ${i + 1} を再生成`}
-                              className="absolute top-1 right-1 flex items-center justify-center w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
-                              style={{ background: "rgba(0,0,0,0.7)" }}
-                            >
-                              {isRegen
-                                ? <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
-                                : <RefreshCw className="w-3 h-3 text-white" />}
-                            </button>
-                            {/* 再生成中オーバーレイ */}
-                            {isRegen && (
-                              <div className="absolute inset-0 rounded-lg flex flex-col items-center justify-center"
-                                style={{ background: "rgba(0,0,0,0.6)" }}>
-                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mb-1" />
-                                <span className="text-white font-bold" style={{ fontSize: 9 }}>生成中</span>
-                              </div>
-                            )}
+                        <button key={i} onClick={() => setModal({ result, idx: i })}
+                          className="flex-shrink-0 relative group rounded-xl overflow-hidden transition-transform hover:scale-105"
+                          style={{ width: 72 }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={url} alt={`slide ${i + 1}`}
+                            className="w-full"
+                            style={{ aspectRatio: "3/4", objectFit: "cover", display: "block" }}
+                          />
+                          <div className="absolute inset-0 rounded-xl transition-opacity opacity-0 group-hover:opacity-100 flex items-center justify-center"
+                            style={{ background: "rgba(0,0,0,0.4)" }}>
+                            <PenLine className="w-4 h-4 text-white" />
                           </div>
-                          {/* 修正指示入力 */}
-                          <div className="flex gap-0.5">
-                            <input
-                              type="text"
-                              value={instr}
-                              onChange={e => setSlideInstructions(prev => ({ ...prev, [slideKey]: e.target.value }))}
-                              onKeyDown={e => {
-                                if (e.key === "Enter" && !e.nativeEvent.isComposing) handleRegenSlide(result, i)
-                              }}
-                              placeholder="修正指示..."
-                              disabled={isRegen}
-                              className="flex-1 min-w-0 px-1.5 py-0.5 rounded outline-none disabled:opacity-50"
-                              style={{ fontSize: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                            />
-                            <button
-                              onClick={() => handleRegenSlide(result, i)}
-                              disabled={isRegen}
-                              className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded disabled:opacity-30"
-                              style={{ background: "var(--accent)", color: "white" }}
-                            >
-                              <RefreshCw className={`w-2.5 h-2.5 ${isRegen ? "animate-spin" : ""}`} />
-                            </button>
-                          </div>
-                        </div>
+                          <span className="absolute bottom-1 left-1 text-white font-bold px-1 rounded pointer-events-none"
+                            style={{ background: "rgba(0,0,0,0.55)", fontSize: 9 }}>{i + 1}</span>
+                          {hasEdit && (
+                            <span className="absolute top-1 left-1 px-1 rounded font-bold pointer-events-none"
+                              style={{ background: "#f59e0b", color: "white", fontSize: 8, lineHeight: "13px" }}>✏</span>
+                          )}
+                          {isRegen && (
+                            <div className="absolute inset-0 rounded-xl flex items-center justify-center"
+                              style={{ background: "rgba(0,0,0,0.6)" }}>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          )}
+                        </button>
                       )
                     })}
+                    {/* 編集ボタン */}
+                    <button onClick={() => setModal({ result, idx: 0 })}
+                      className="flex-shrink-0 rounded-xl flex flex-col items-center justify-center gap-1 transition-opacity hover:opacity-80"
+                      style={{ width: 72, aspectRatio: "3/4", background: "var(--bg)", border: "1px dashed var(--border)", color: "var(--accent)" }}>
+                      <PenLine className="w-4 h-4" />
+                      <span style={{ fontSize: 9, fontWeight: 700 }}>編集する</span>
+                    </button>
                   </div>
-                )}
-                {result.imageUrls.length === 0 && (
+                ) : (
                   <p className="text-xs" style={{ color: "var(--muted)" }}>{r_.noImage}</p>
                 )}
-
-                {/* テキスト展開ボタン */}
-                <button
-                  onClick={() => toggleExpand(result.id)}
-                  className="flex items-center gap-1.5 text-xs font-medium transition-opacity hover:opacity-70"
-                  style={{ color: "var(--accent)" }}
-                >
-                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  {isExpanded ? r_.hideText : r_.showText}
-                </button>
               </div>
-
-              {/* ─── 展開: 生成テキスト（編集可能） ─── */}
-              {isExpanded && (
-                <div className="border-t px-4 py-3 space-y-3"
-                  style={{ borderColor: "var(--border)", background: "var(--bg)" }}>
-                  <p className="text-[10px] font-bold" style={{ color: "var(--muted)" }}>
-                    テキストを編集 → 各スライドの↺ボタンで再生成
-                  </p>
-                  {result.slides.map((slide, si) => {
-                    const slideKey = `${result.id}_${si}`
-                    const edit = editedSlides[slideKey] ?? {}
-                    const isRegen = regenLoading[slideKey]
-                    return (
-                      <div key={slide.slideNumber} className="rounded-xl p-3 space-y-1.5"
-                        style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                        {/* 番号 + タグ + 再生成ボタン */}
-                        <div className="flex items-center gap-2">
-                          <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-white font-bold"
-                            style={{ background: "var(--accent)", fontSize: 10 }}>
-                            {slide.slideNumber}
-                          </span>
-                          <input
-                            type="text"
-                            value={edit.tag ?? slide.tag}
-                            onChange={e => setEditedSlides(prev => ({ ...prev, [slideKey]: { ...prev[slideKey], tag: e.target.value } }))}
-                            className="flex-1 min-w-0 text-xs font-bold px-1.5 py-0.5 rounded outline-none"
-                            style={{ color: "var(--accent)", background: "transparent", border: "1px solid var(--border)" }}
-                          />
-                          {(edit.tag || edit.headline || edit.bullets !== undefined || edit.accent !== undefined) && (
-                            <span className="text-[9px] px-1 py-0.5 rounded font-bold flex-shrink-0"
-                              style={{ background: "#f59e0b22", color: "#f59e0b" }}>編集済</span>
-                          )}
-                          <button
-                            onClick={() => handleRegenSlide(result, si)}
-                            disabled={isRegen}
-                            title={`スライド ${si + 1} を再生成`}
-                            className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-white disabled:opacity-30 transition-opacity hover:opacity-80"
-                            style={{ background: "var(--accent)" }}
-                          >
-                            <RefreshCw className={`w-3 h-3 ${isRegen ? "animate-spin" : ""}`} />
-                          </button>
-                        </div>
-                        {/* ヘッドライン */}
-                        <input
-                          type="text"
-                          value={edit.headline ?? slide.headline}
-                          onChange={e => setEditedSlides(prev => ({ ...prev, [slideKey]: { ...prev[slideKey], headline: e.target.value } }))}
-                          className="w-full font-bold text-sm px-2 py-1 rounded outline-none"
-                          style={{ color: "var(--text)", background: "transparent", border: "1px solid var(--border)" }}
-                        />
-                        {/* 箇条書き */}
-                        {(slide.bullets && slide.bullets.length > 0) || edit.bullets !== undefined ? (
-                          <textarea
-                            value={edit.bullets ?? (slide.bullets ?? []).join("\n")}
-                            onChange={e => setEditedSlides(prev => ({ ...prev, [slideKey]: { ...prev[slideKey], bullets: e.target.value } }))}
-                            rows={Math.max(2, (slide.bullets?.length ?? 2))}
-                            className="w-full text-xs px-2 py-1 rounded outline-none resize-none"
-                            style={{ color: "var(--muted)", background: "transparent", border: "1px solid var(--border)", lineHeight: 1.6 }}
-                            placeholder="箇条書き（1行1項目）"
-                          />
-                        ) : null}
-                        {/* アクセント */}
-                        <input
-                          type="text"
-                          value={edit.accent ?? (slide.accent ?? "")}
-                          onChange={e => setEditedSlides(prev => ({ ...prev, [slideKey]: { ...prev[slideKey], accent: e.target.value } }))}
-                          className="w-full text-xs italic px-2 py-0.5 rounded outline-none"
-                          style={{ color: "var(--accent)", background: "transparent", border: "1px solid transparent" }}
-                          placeholder="アクセント（任意）"
-                          onFocus={e => (e.currentTarget.style.borderColor = "var(--border)")}
-                          onBlur={e => (e.currentTarget.style.borderColor = "transparent")}
-                        />
-                        {/* 修正指示（展開内でも使える） */}
-                        <div className="flex gap-1.5 pt-0.5">
-                          <input
-                            type="text"
-                            value={slideInstructions[slideKey] ?? ""}
-                            onChange={e => setSlideInstructions(prev => ({ ...prev, [slideKey]: e.target.value }))}
-                            onKeyDown={e => {
-                              if (e.key === "Enter" && !e.nativeEvent.isComposing) handleRegenSlide(result, si)
-                            }}
-                            placeholder="修正指示（例: 背景をカフェに）"
-                            disabled={isRegen}
-                            className="flex-1 px-2 py-1 rounded text-[10px] outline-none disabled:opacity-50"
-                            style={{ border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                          />
-                          <button
-                            onClick={() => handleRegenSlide(result, si)}
-                            disabled={isRegen}
-                            className="flex-shrink-0 px-2 py-1 rounded text-[10px] font-bold text-white disabled:opacity-30"
-                            style={{ background: "var(--accent)" }}
-                          >
-                            <RefreshCw className={`w-3 h-3 ${isRegen ? "animate-spin" : ""}`} />
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-
-                  {result.caption && (
-                    <div className="rounded-xl p-3 mt-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                      <p className="text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>{r_.caption}</p>
-                      <p className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: "var(--text)" }}>{result.caption}</p>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )
         })}
       </div>
 
-      {/* フルサイズモーダル */}
+      {/* ─── 編集モーダル ─── */}
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.92)" }}
           onClick={closeModal}>
-          <div className="relative flex items-center"
-            style={{ maxHeight: "95vh", maxWidth: "95vw" }}
+          <div
+            className="relative flex rounded-2xl overflow-hidden w-full"
+            style={{ maxWidth: 960, maxHeight: "95vh", background: "var(--bg)" }}
             onClick={e => e.stopPropagation()}>
-            {modal.idx > 0 && (
-              <button onClick={() => setModal(prev => prev ? { ...prev, idx: prev.idx - 1 } : null)}
-                className="absolute flex items-center justify-center w-10 h-10 rounded-full text-white transition-opacity hover:opacity-100 opacity-70"
-                style={{ left: "-3rem", background: "rgba(255,255,255,0.15)" }}>
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-            )}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            {modal.result.imageUrls[modal.idx] && (
-              <img src={modal.result.imageUrls[modal.idx]} alt={`slide ${modal.idx + 1}`}
-                className="rounded-xl shadow-2xl"
-                style={{ maxHeight: "90vh", maxWidth: "min(420px, 90vw)", objectFit: "contain" }}
-              />
-            )}
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold text-white"
-              style={{ background: "rgba(0,0,0,0.55)" }}>
-              {modal.idx + 1} / {modal.result.imageUrls.filter(Boolean).length}
+
+            {/* ── LEFT: 画像プレビュー ── */}
+            <div className="flex-1 flex flex-col items-center justify-center relative min-w-0"
+              style={{ background: "#0a0a0a", minHeight: 0 }}>
+
+              {/* 画像 */}
+              <div className="relative flex items-center justify-center w-full h-full p-4">
+                {modal.result.imageUrls[modal.idx] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={modal.result.imageUrls[modal.idx]}
+                    alt={`slide ${modal.idx + 1}`}
+                    className="rounded-xl shadow-2xl"
+                    style={{ maxHeight: "calc(95vh - 2rem)", maxWidth: "100%", objectFit: "contain" }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center rounded-xl"
+                    style={{ width: 280, aspectRatio: "3/4", background: "#1a1a1a", color: "#555" }}>
+                    <ImageIcon className="w-10 h-10" />
+                  </div>
+                )}
+                {/* 再生成中オーバーレイ */}
+                {modalIsRegen && (
+                  <div className="absolute inset-4 rounded-xl flex flex-col items-center justify-center gap-3"
+                    style={{ background: "rgba(0,0,0,0.75)" }}>
+                    <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin" />
+                    <span className="text-white font-bold text-sm">生成中...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 前へ */}
+              {modal.idx > 0 && (
+                <button
+                  onClick={() => setModal(prev => prev ? { ...prev, idx: prev.idx - 1 } : null)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-10 h-10 rounded-full text-white transition-opacity opacity-60 hover:opacity-100"
+                  style={{ background: "rgba(255,255,255,0.15)" }}>
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+              )}
+
+              {/* 次へ */}
+              {modal.idx < modal.result.imageUrls.length - 1 && (
+                <button
+                  onClick={() => setModal(prev => prev ? { ...prev, idx: prev.idx + 1 } : null)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-10 h-10 rounded-full text-white transition-opacity opacity-60 hover:opacity-100"
+                  style={{ background: "rgba(255,255,255,0.15)" }}>
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              )}
+
+              {/* スライドカウンター */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold text-white pointer-events-none"
+                style={{ background: "rgba(0,0,0,0.6)" }}>
+                {modal.idx + 1} / {modal.result.imageUrls.filter(Boolean).length}
+              </div>
             </div>
-            {modal.idx < modal.result.imageUrls.length - 1 && (
-              <button onClick={() => setModal(prev => prev ? { ...prev, idx: prev.idx + 1 } : null)}
-                className="absolute flex items-center justify-center w-10 h-10 rounded-full text-white transition-opacity hover:opacity-100 opacity-70"
-                style={{ right: "-3rem", background: "rgba(255,255,255,0.15)" }}>
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            )}
-            <button onClick={closeModal}
-              className="absolute top-2 right-2 flex items-center justify-center w-8 h-8 rounded-full text-white transition-opacity hover:opacity-100 opacity-80"
-              style={{ background: "rgba(0,0,0,0.6)" }}>
-              <X className="w-4 h-4" />
-            </button>
+
+            {/* ── RIGHT: 編集パネル ── */}
+            <div className="flex flex-col" style={{ width: 380, minWidth: 320, maxWidth: 400, borderLeft: "1px solid var(--border)", background: "var(--card)" }}>
+
+              {/* ヘッダー */}
+              <div className="flex items-start gap-2 p-4 flex-shrink-0" style={{ borderBottom: "1px solid var(--border)" }}>
+                <div className="flex-1 min-w-0">
+                  {modal.result.refBenchmark && (
+                    <p className="text-xs font-mono truncate mb-0.5" style={{ color: "var(--muted)" }}>
+                      📌 {modal.result.refBenchmark}
+                    </p>
+                  )}
+                  <p className="font-bold text-sm leading-snug" style={{ color: "var(--text)" }}>
+                    {modal.result.overallTitle}
+                  </p>
+                </div>
+                <button onClick={closeModal}
+                  className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-opacity hover:opacity-80"
+                  style={{ background: "var(--bg)", color: "var(--text)" }}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* サムネイルストリップ */}
+              <div className="flex gap-1.5 p-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: "1px solid var(--border)", scrollbarWidth: "thin" }}>
+                {modal.result.imageUrls.map((url, i) => {
+                  if (!url) return null
+                  const isActive = i === modal.idx
+                  const hasEdit  = !!editedSlides[`${modal.result.id}_${i}`]
+                  return (
+                    <button key={i} onClick={() => setModal(prev => prev ? { ...prev, idx: i } : null)}
+                      className="flex-shrink-0 relative rounded-lg overflow-hidden transition-all"
+                      style={{
+                        width: 44,
+                        outline: isActive ? "2px solid var(--accent)" : "2px solid transparent",
+                        outlineOffset: 2,
+                        opacity: isActive ? 1 : 0.5,
+                      }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="" className="w-full" style={{ aspectRatio: "3/4", objectFit: "cover", display: "block" }} />
+                      {hasEdit && (
+                        <span className="absolute top-0.5 left-0.5 rounded pointer-events-none"
+                          style={{ background: "#f59e0b", width: 6, height: 6, borderRadius: "50%", display: "block" }} />
+                      )}
+                      {regenLoading[`${modal.result.id}_${i}`] && (
+                        <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
+                          <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* 編集エリア (スクロール可能) */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: "thin" }}>
+
+                {/* スライド番号 + 編集済バッジ */}
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-xs flex-shrink-0"
+                    style={{ background: "var(--accent)" }}>
+                    {modal.idx + 1}
+                  </span>
+                  <span className="text-sm font-bold" style={{ color: "var(--text)" }}>スライド {modal.idx + 1}</span>
+                  {modalHasEdit && (
+                    <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-bold"
+                      style={{ background: "#f59e0b22", color: "#f59e0b" }}>✏ 編集済</span>
+                  )}
+                </div>
+
+                {modalSlide && (
+                  <>
+                    {/* タグ */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>タグ</label>
+                      <input
+                        type="text"
+                        value={modalEdit.tag ?? modalSlide.tag}
+                        onChange={e => setModalField("tag", e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl text-sm font-bold outline-none transition-colors"
+                        style={{ background: "var(--bg)", color: "var(--accent)", border: "1px solid var(--border)" }}
+                      />
+                    </div>
+
+                    {/* ヘッドライン */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>ヘッドライン</label>
+                      <input
+                        type="text"
+                        value={modalEdit.headline ?? modalSlide.headline}
+                        onChange={e => setModalField("headline", e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl text-base font-bold outline-none transition-colors"
+                        style={{ background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)" }}
+                      />
+                    </div>
+
+                    {/* 箇条書き */}
+                    {((modalSlide.bullets && modalSlide.bullets.length > 0) || modalEdit.bullets !== undefined) && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>箇条書き（1行1項目）</label>
+                        <textarea
+                          value={modalEdit.bullets ?? (modalSlide.bullets ?? []).join("\n")}
+                          onChange={e => setModalField("bullets", e.target.value)}
+                          rows={Math.max(3, (modalSlide.bullets?.length ?? 3))}
+                          className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+                          style={{ background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)", lineHeight: 1.7 }}
+                        />
+                      </div>
+                    )}
+
+                    {/* アクセント */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>アクセント</label>
+                      <input
+                        type="text"
+                        value={modalEdit.accent ?? (modalSlide.accent ?? "")}
+                        onChange={e => setModalField("accent", e.target.value)}
+                        placeholder="（任意）"
+                        className="w-full px-3 py-2 rounded-xl text-sm italic outline-none transition-colors"
+                        style={{ background: "var(--bg)", color: "var(--accent)", border: "1px solid var(--border)" }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* 修正指示 */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold" style={{ color: "var(--muted)" }}>AI修正指示（任意）</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={modalInstr}
+                      onChange={e => setModalInstr(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter" && !e.nativeEvent.isComposing && modal)
+                          handleRegenSlide(modal.result, modal.idx)
+                      }}
+                      placeholder="例: 背景をカフェに、もっと明るく"
+                      disabled={modalIsRegen}
+                      className="flex-1 min-w-0 px-3 py-2.5 rounded-xl text-sm outline-none disabled:opacity-50"
+                      style={{ background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)" }}
+                    />
+                    <button
+                      onClick={() => { if (modal) setModal(prev => prev ? { ...prev } : null) }}
+                      disabled={!modalInstr.trim() || modalIsRegen}
+                      className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center disabled:opacity-30 transition-opacity hover:opacity-80"
+                      style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--accent)" }}
+                      title="テキストのみ反映（再生成なし）">
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 再生成ボタン */}
+                <button
+                  onClick={() => { if (modal) handleRegenSlide(modal.result, modal.idx) }}
+                  disabled={modalIsRegen}
+                  className="w-full py-3 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-opacity hover:opacity-85 disabled:opacity-50"
+                  style={{ background: "var(--accent)" }}>
+                  <RefreshCw className={`w-4 h-4 ${modalIsRegen ? "animate-spin" : ""}`} />
+                  {modalIsRegen ? "生成中..." : "このスライドを再生成"}
+                </button>
+              </div>
+
+              {/* フッター: 投稿メタ情報 */}
+              <div className="flex-shrink-0 p-4 space-y-3" style={{ borderTop: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded-md text-xs font-bold"
+                    style={{ background: POST_TYPE_COLORS[modal.result.postType].bg, color: POST_TYPE_COLORS[modal.result.postType].text }}>
+                    {POST_TYPE_LABELS[modal.result.postType]}
+                  </span>
+                  {modal.result.hookType && (
+                    <span className="px-2 py-0.5 rounded-md text-xs font-bold" style={{ background: HOOK_COLORS.bg, color: HOOK_COLORS.text }}>{modal.result.hookType}</span>
+                  )}
+                  {modal.result.structureType && (
+                    <span className="px-2 py-0.5 rounded-md text-xs font-bold" style={{ background: STRUCT_COLORS.bg, color: STRUCT_COLORS.text }}>{modal.result.structureType}</span>
+                  )}
+                  {modal.result.compositionType && (
+                    <span className="px-2 py-0.5 rounded-md text-xs font-bold" style={{ background: COMP_COLORS.bg, color: COMP_COLORS.text }}>{modal.result.compositionType}</span>
+                  )}
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>{modal.result.personaName}</span>
+                </div>
+
+                {modal.result.caption && (
+                  <div>
+                    <button onClick={() => setCaptionOpen(p => !p)}
+                      className="text-xs font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
+                      style={{ color: "var(--muted)" }}>
+                      {captionOpen ? "▲" : "▼"} キャプション
+                    </button>
+                    {captionOpen && (
+                      <p className="mt-1.5 text-xs leading-relaxed whitespace-pre-wrap px-2"
+                        style={{ color: "var(--text)", borderLeft: "2px solid var(--border)" }}>
+                        {modal.result.caption}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
