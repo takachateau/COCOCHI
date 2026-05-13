@@ -602,7 +602,68 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
       : null,
   ].filter(Boolean).join("  ")
 
-  // ─── プロンプト ───────────────────────────────────────────────
+  // ─── bgInherit=true の場合: 超シンプルなテキスト置換専用プロンプトを使う ───
+  // 通常プロンプトの [1]「スマホ写真生成」[2]「背景をコピーするな」[4]「人物生成」が
+  // 「背景をそのまま保て」と真逆の指示になるため、bgInherit では全セクションを捨てる。
+  if (bgInherit) {
+    const bgInheritPrompt = [
+      `Minimal image edit task. You are given an existing photo (Image 1).`,
+      `YOUR ONLY JOB: erase the existing text overlay and render new text in its place.`,
+      ``,
+      `PRESERVE EVERYTHING ELSE in Image 1 — do not change:`,
+      `- Background, walls, floor, windows, furniture, plants, street, sky, any scenery`,
+      `- The person's face, body, hair, clothing, pose, and position`,
+      `- Lighting, shadows, color grading, and atmosphere`,
+      `- Camera angle, framing, and shot type`,
+      ``,
+      `DO NOT regenerate, reimagine, or alter any visual element except the text.`,
+      ``,
+      `NEW TEXT TO RENDER (replace all existing text with exactly this):`,
+      `TAG (small colored label, same position as original): "${tag}"`,
+      `HEADLINE (largest text, bold, same position as original): "${headline}"`,
+      hasBullets
+        ? `BODY BULLETS (medium size, same position as original): ${normalizedBullets.map((b, i) =>
+            isNumberedStyle ? `"${i + 1}. ${b}"` : `"• ${b}"`).join(" | ")}`
+        : `NO BODY BULLETS — leave that area as background`,
+      accentText ? `ACCENT (small text, same position as original): "${accentText}"` : null,
+      ``,
+      hasProduct && productImageUrl
+        ? `ADDITIONALLY: Replace the product item shown in the photo with the product from Image 2. Keep the product in the same position, size, and orientation as in Image 1. All other elements unchanged.`
+        : null,
+      ``,
+      FONT_SPEC,
+      `ERASE completely: any Lemon8 app logo, @username badge, or platform watermark.`,
+      `${noUI}`,
+      instruction ? `ADDITIONAL INSTRUCTION (apply on top of everything above): ${instruction}` : null,
+    ].filter(Boolean).join("\n")
+
+    console.log(`[generateV2Slide] bgInherit prompt[:300]: ${bgInheritPrompt.slice(0, 300)}`)
+
+    const imageUrls = [refImageUrl, productImageUrl].filter((u): u is string => Boolean(u))
+    try {
+      const buffer = await generateImage(bgInheritPrompt, imageUrls)
+      return { buffer, policyFallback: false, falCalls: 1 }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!msg.startsWith("FAL_CONTENT_POLICY")) throw err
+      // ポリシー違反フォールバック: さらにシンプルに
+      const fallback = [
+        `Image edit: replace only the text overlay. Keep background and person identical.`,
+        `New text: TAG="${tag}" HEADLINE="${headline}"`,
+        hasBullets ? `BULLETS: ${normalizedBullets.map(b => `"• ${b}"`).join(" | ")}` : null,
+        accentText ? `ACCENT: "${accentText}"` : null,
+        `Portrait orientation. ${noUI}`,
+      ].filter(Boolean).join(" ")
+      try {
+        const buffer = await generateImage(fallback, imageUrls)
+        return { buffer, policyFallback: true, falCalls: 2 }
+      } catch {
+        return { buffer: null, policyFallback: true, falCalls: 2 }
+      }
+    }
+  }
+
+  // ─── 通常プロンプト（bgInherit=false）────────────────────────────
   // 設計方針:
   //   [1] iPhone品質の土台
   //   [2] 構図（写真的背景のみ参照・グラフィック無視）
