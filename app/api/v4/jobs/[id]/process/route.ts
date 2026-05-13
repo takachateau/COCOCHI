@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server"
 import {
+  supabase,
   dbLoadPersonas, dbLoadBenchmarkPosts, dbLoadCompetitorProducts,
   dbLoadRecentPostsByPersona, dbLoadJob, dbUpdateJob, dbUpdateBenchmarkSlideStyleDescs,
   dbLoadHiddenAccountNames, dbSaveGeneratedPost, dbUpdateGeneratedPostImages,
@@ -184,28 +185,45 @@ async function processSlideRegen(
 
     const [imageUrl] = await uploadSlideBuffers([result.buffer])
 
-    // generated_posts の該当スライド URL を先に更新する（競合状態を防ぐため）
-    // ※ status="done" を先に書くとクライアントのポーリングが先に拾ってしまい、
-    //   DB更新前に loadResults() が走って古い画像が表示される
-    if (p.generatedPostId && !p.generatedPostId.startsWith("job_")) {
-      const { createClient } = await import("@supabase/supabase-js")
-      const sb = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      )
-      const { data } = await sb
-        .from("generated_posts")
-        .select("image_urls")
-        .eq("id", p.generatedPostId)
-        .single()
-      if (data) {
-        const urls: string[] = [...((data.image_urls as string[]) ?? [])]
-        urls[p.slideIndex] = imageUrl
-        await dbUpdateGeneratedPostImages(p.generatedPostId, urls)
+    // ─ 画像 URL を保存先に書き込む（status="done" より前に実行して競合を防ぐ）─
+    //
+    // 保存先は generatedPostId の形式で判定する:
+    //   "job_XXX" → results ページが generation_jobs を参照している → 元ジョブの image_urls を更新
+    //   UUID      → results ページが generated_posts を参照している → generated_posts.image_urls を更新
+    if (p.generatedPostId) {
+      if (p.generatedPostId.startsWith("job_")) {
+        // ─ job_ 系: 元の generation_job の image_urls[slideIndex] を差し替え ─
+        const originalJobId = p.generatedPostId.replace(/^job_/, "")
+        const origJob = await dbLoadJob(originalJobId)
+        if (origJob) {
+          const updatedUrls = [...(origJob.imageUrls ?? [])] as (string | null)[]
+          // スライド数が足りない場合は null で埋める
+          while (updatedUrls.length <= p.slideIndex) updatedUrls.push(null)
+          updatedUrls[p.slideIndex] = imageUrl
+          await dbUpdateJob(originalJobId, { imageUrls: updatedUrls })
+          console.log(`[processSlideRegen] updated original job ${originalJobId} imageUrls[${p.slideIndex}]`)
+        } else {
+          console.warn(`[processSlideRegen] original job not found: ${originalJobId}`)
+        }
+      } else {
+        // ─ UUID 系: generated_posts.image_urls[slideIndex] を差し替え ─
+        const { data, error } = await supabase
+          .from("generated_posts")
+          .select("image_urls")
+          .eq("id", p.generatedPostId)
+          .single()
+        if (error || !data) {
+          console.warn(`[processSlideRegen] generated_posts SELECT failed: id=${p.generatedPostId} error=${error?.message ?? "no data"}`)
+        } else {
+          const urls: string[] = [...((data.image_urls as string[]) ?? [])]
+          urls[p.slideIndex] = imageUrl
+          await dbUpdateGeneratedPostImages(p.generatedPostId, urls)
+          console.log(`[processSlideRegen] updated generated_posts ${p.generatedPostId} imageUrls[${p.slideIndex}]`)
+        }
       }
     }
 
-    // generated_posts 更新が完了してからステータスを done にする
+    // image_urls の更新が完了してからステータスを done にする
     await dbUpdateJob(jobId, {
       status:       "done",
       imageUrls:    [imageUrl],

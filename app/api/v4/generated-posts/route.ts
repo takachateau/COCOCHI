@@ -8,6 +8,8 @@
  * DELETE /api/v4/generated-posts?id=xxx&purge=1 — 完全削除（復元不可）
  */
 import { NextRequest, NextResponse } from "next/server"
+
+export const dynamic = "force-dynamic" // Vercel Edge キャッシュを無効化（スライド再生成後に即反映させるため）
 import {
   dbSaveGeneratedPost, dbLoadGeneratedPosts, dbLoadRecentPostsByPersona,
   dbDeleteGeneratedPost, dbUpdateGeneratedPostImages, dbLoadDoneJobs, dbDeleteJob,
