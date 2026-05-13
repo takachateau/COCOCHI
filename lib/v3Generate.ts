@@ -162,6 +162,8 @@ export async function generateV3Post(params: {
 }): Promise<GeneratedPostText> {
   const { persona, postType, product, types, benchmarkSamples, competitors, targetSlideCount, history } = params
 
+  const hasCompetitors = !!(competitors && competitors.length > 0)
+
   const productBlock = (postType === "product" || postType === "mixed") && product
     ? postType === "mixed"
       ? `\n【自然に登場させる商品（tips構造の流れの中で1〜2スライド）】
@@ -172,13 +174,16 @@ export async function generateV3Post(params: {
 ${product.forbiddenWords ? `- 禁止ワード: ${product.forbiddenWords}` : ""}
 ⚠ この商品を主役にしない。tipsの文脈で「このステップではこれを使っている」「ここでおすすめなのがこれ」のように自然に1〜2スライドで登場させること。
 `
-      : `\n【最推し商品（広告色を避け、ペルソナの自然な推奨として登場させる）】
+      : `\n【自社商品（必ず独立したスライドとして登場させる — 競合比較投稿では特に厳守）】
 - 商品名: ${product.name}
 - 価格: ${product.price ?? "?"}
 - 特徴・成分: ${product.ingredients ?? ""}
 - 訴求ポイント: ${product.appealPoints ?? ""}
 - 使い方: ${product.howToUse ?? ""}
 ${product.forbiddenWords ? `- 禁止ワード: ${product.forbiddenWords}` : ""}
+${hasCompetitors ? `⚠ 競合比較投稿では: 競合商品スライドの最後（CTAの直前）に、必ずこの商品の独立スライドを1枚生成すること。
+  headline = "〇つ目 | ${product.name}${product.price ? ` ¥${product.price}` : ""}" の形式で。
+  bullets には訴求ポイント・特徴を書く。このスライドを省略した出力はルール違反。` : ""}
 `
     : ""
 
@@ -198,11 +203,14 @@ ${competitors.map((c, i) => `[C${i + 1}] ${c.brandName} / ${c.productName} / ${c
   - 商品スライドには順位の代わりに "1つ目" "2つ目" "3つ目" のような **順序表現** を使う
     例: headline = "1つ目 | SKIN1004 ヒアルーシカ サンセラム ¥2,700"
   - フックの headline も "〇選ランキング" "ベストランキング" ではなく「7本全部試した」「全部使い比べた」などの **体験ベース表現** にする
-  - **最終スライド（CTA）に「全部試した結論: 〇〇一択」型の結論を入れる**:
+  - **商品スライドの順番: 競合${competitors?.length ?? "N"}枚 → 自社商品(anetos)1枚 → CTA**
+    - 自社商品スライドは競合スライドの「次の番号」を付けて最後の商品スライドに配置する
+    - CTA（最終スライド）は締めであり、自社商品の紹介はCTA前の自社スライドで済ませておくこと
+
+  - **最終スライド（CTA）は「全部試した結論」型の締め**:
     - headline = "全部試した結論" や "使い比べた結果" などの締め表現
-    - bullets に自社商品の決め手となる理由を2〜3個
+    - bullets に自社商品を選ぶ決め手を2〜3個
     - accent = 自社商品名 + "一択" （例: "アネトス一択"）
-    - このCTAスライドで初めて自社商品を「全試した上での結論」として提示することで、PR感なく最推しを伝える
 
 ⚠ ★ タイトルの数字と商品スライド数は **完全に一致** させる:
   - "ベスト5" "5選" "TOP5" を書くなら → 商品スライドを ちょうど5枚 作る（合計: 1 フック + 5 商品 + 1 CTA = 7枚）
@@ -298,7 +306,7 @@ JSONのみ（前後に説明・コードブロック禁止）:
 ${targetSlideCount
   ? `【スライド枚数（絶対厳守）】${targetSlideCount}枚ちょうど。1枚でも多くても少なくてもNG。${
       (postType === "product" || postType === "mixed") && competitors && competitors.length > 0
-        ? `\n- 内訳: フック1枚 + 商品スライド${targetSlideCount - 2}枚（自社1＋競合${competitors.length}）+ CTA1枚 = ${targetSlideCount}枚\n- 渡された競合商品リスト（${competitors.length}件）を過不足なく全て使うこと`
+        ? `\n- 内訳（厳守）: フック1枚 + 競合商品${competitors.length}枚 + 自社商品(anetos)1枚 + CTA1枚 = ${targetSlideCount}枚\n- 順番: フック → 競合[1〜${competitors.length}] → 自社(anetos)[${competitors.length + 1}つ目] → CTA\n- 渡された競合商品リスト（${competitors.length}件）を過不足なく全て使い、その後に必ず自社商品スライドを置くこと`
         : ""
     }`
   : `スライド枚数の目安:

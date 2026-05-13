@@ -295,8 +295,11 @@ export async function POST(req: NextRequest) {
 
     // ─ 背景グループ対応生成 ────────────────────────────────────────
     // backgroundGroups があれば: グループ内1枚目を生成→残りはその結果を背景参照として渡す
-    // なければ: 従来通り全スライド並列生成
-    const backgroundGroups = refBenchmark.backgroundGroups  // number[][] | null
+    // なければ + 競合比較投稿: 全スライドを自動で1グループ化（同一背景を強制）
+    // なければ + 通常投稿: 従来通り全スライド並列生成
+    const rawBackgroundGroups = refBenchmark.backgroundGroups  // number[][] | null
+    const backgroundGroups = rawBackgroundGroups ??
+      (competitors.length > 0 ? [slides.map((_, i) => i)] : null)
     let usedBgGroupMode = false
 
     async function generateOneSlide(
