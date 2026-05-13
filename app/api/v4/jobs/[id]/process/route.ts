@@ -174,6 +174,7 @@ async function processSlideRegen(
       slideNumber:      p.slide.slideNumber,
       visualProfile,
       personaHint,
+      instruction:      p.instruction || undefined,
     })
 
     if (!result.buffer) {

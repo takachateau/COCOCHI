@@ -206,6 +206,7 @@ export interface SlideRegenParams {
   slide:           GeneratedSlide
   types:           { hookType: HookType; structureType: StructureType; compositionType: CompositionType } | null
   refBenchmark?:   string   // 使用するベンチマークの folder_path
+  instruction?:    string   // ユーザー追加指示（例: "背景をカフェに"）
 }
 
 export interface GenerationJob {

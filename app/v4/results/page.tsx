@@ -175,6 +175,13 @@ export default function ResultsPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [modal, closeModal])
 
+  // results が更新されたらモーダルの中身も同期する（再生成後のリフレッシュで自動反映）
+  useEffect(() => {
+    if (!modal) return
+    const updated = results.find(r => r.id === modal.result.id)
+    if (updated) setModal(prev => prev ? { ...prev, result: updated } : null)
+  }, [results]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleRegenSlide(result: GeneratedPost, slideIndex: number) {
     const key = `${result.id}_${slideIndex}`
     setRegenLoading(prev => ({ ...prev, [key]: true }))
@@ -182,32 +189,51 @@ export default function ResultsPage() {
     try {
       const effectiveSlide = getEffectiveSlide(result, slideIndex)
       const instruction    = slideInstructions[key]?.trim() || undefined
-      const r = await fetch("/api/v4/regenerate-slide", {
+
+      // ─── キューに追加（enqueue-slide-regen） ───
+      const enqRes = await fetch("/api/v4/jobs/enqueue-slide-regen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          slide: effectiveSlide, personaId: result.personaId, postType: result.postType,
+          personaId: result.personaId,
+          postType:  result.postType,
           productId: result.productId ?? undefined,
-          types: result.hookType && result.structureType && result.compositionType
-            ? { hookType: result.hookType, structureType: result.structureType, compositionType: result.compositionType }
-            : undefined,
-          slideIndex, benchmarkFolderPath: result.refBenchmark ?? undefined, instruction,
+          slideRegenParams: {
+            generatedPostId: result.id,
+            slideIndex,
+            slide:           effectiveSlide,
+            types: result.hookType && result.structureType && result.compositionType
+              ? { hookType: result.hookType, structureType: result.structureType, compositionType: result.compositionType }
+              : null,
+            refBenchmark: result.refBenchmark ?? undefined,
+            instruction:  instruction ?? undefined,
+          },
         }),
       })
-      const d = await r.json() as { imageUrl?: string; error?: string }
-      if (!r.ok || d.error) throw new Error(d.error ?? "再生成失敗")
-      if (!d.imageUrl) throw new Error("再生成後の画像URLが取得できませんでした")
-      setResults(prev => prev.map(p => {
-        if (p.id !== result.id) return p
-        const newUrls = [...p.imageUrls]; newUrls[slideIndex] = d.imageUrl!
-        return { ...p, imageUrls: newUrls }
-      }))
-      setModal(prev => {
-        if (!prev || prev.result.id !== result.id) return prev
-        const newUrls = [...prev.result.imageUrls]; newUrls[slideIndex] = d.imageUrl!
-        return { ...prev, result: { ...prev.result, imageUrls: newUrls } }
+      const enqData = await enqRes.json() as { jobId?: string; error?: string }
+      if (!enqRes.ok || enqData.error) throw new Error(enqData.error ?? "エンキュー失敗")
+      const jobId = enqData.jobId!
+
+      // ─── ジョブ完了までポーリング（3秒ごと）───
+      await new Promise<void>((resolve, reject) => {
+        const timer = setInterval(async () => {
+          try {
+            const jr = await fetch(`/api/v4/jobs/${jobId}`)
+            const jd = await jr.json() as { job?: { status: string; errorMessage?: string } }
+            const status = jd.job?.status
+            if (status === "done") {
+              clearInterval(timer)
+              resolve()
+            } else if (status === "error" || status === "cancelled") {
+              clearInterval(timer)
+              reject(new Error(jd.job?.errorMessage ?? "再生成に失敗しました"))
+            }
+          } catch { /* ポーリング失敗は無視して続行 */ }
+        }, 3000)
       })
-      // clear instruction after successful regen
+
+      // ─── DB から最新結果を取得して一覧＆モーダルを更新 ───
+      await loadResults("active")
       setSlideInstructions(prev => { const next = { ...prev }; delete next[key]; return next })
     } catch (e) {
       setRegenError(e instanceof Error ? e.message : "再生成失敗")
