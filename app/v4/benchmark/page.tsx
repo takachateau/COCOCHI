@@ -193,6 +193,23 @@ export default function BenchmarkPage() {
     }
   }
 
+  // 全件BG設定を解除
+  async function handleClearAllBgGroups(accountPosts: BenchmarkPost[]) {
+    const set = accountPosts.filter(p => p.backgroundGroups)
+    if (set.length === 0) { alert("BG設定済みの投稿がありません"); return }
+    if (!confirm(`${set.length}件のBG設定をすべて解除します。よろしいですか？`)) return
+    for (const post of set) {
+      try {
+        await fetch("/api/v4/benchmark/save-bg-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ benchmarkPostId: post.id, groups: null }),
+        })
+        setPosts(prev => prev.map(p => p.id === post.id ? { ...p, backgroundGroups: null } : p))
+      } catch { /* 1件失敗しても続行 */ }
+    }
+  }
+
   // 全件一括BG検出（検出のみ自動保存、確認は後でBGボタンから）
   async function handleBulkDetectBgGroups(accountPosts: BenchmarkPost[]) {
     if (!confirm(`${accountPosts.length}件の投稿を一括でBG検出します。Claude Vision APIが各投稿に呼ばれます（数十秒かかります）。よろしいですか？`)) return
@@ -1156,6 +1173,18 @@ export default function BenchmarkPage() {
                           {bulkBgProgress ? `BG検出中 ${bulkBgProgress.current}/${bulkBgProgress.total}` : "BG検出中..."}</>
                       : <>🔗 全件BG一括検出</>}
                   </button>
+                  {/* 全件BG解除 */}
+                  {grouped[selectedAccount].some(p => p.backgroundGroups) && (
+                    <button
+                      onClick={() => handleClearAllBgGroups(grouped[selectedAccount])}
+                      disabled={bulkBgDetecting}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-85 disabled:opacity-50"
+                      style={{ color: "#ef4444", border: "1px solid #ef444466", background: "transparent" }}
+                      title="全投稿のBG設定を解除します"
+                    >
+                      🗑 BG全解除
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setAccountName(selectedAccount)

@@ -287,7 +287,7 @@ export async function dbUpdateBenchmarkSlideStyleDescs(
   if (error) throw new Error(`BenchmarkPost slideStyleDescs update error: ${error.message}`)
 }
 
-export async function dbUpdateBackgroundGroups(id: string, groups: number[][]): Promise<void> {
+export async function dbUpdateBackgroundGroups(id: string, groups: number[][] | null): Promise<void> {
   const { error } = await supabase
     .from("benchmark_posts")
     .update({ background_groups: groups })

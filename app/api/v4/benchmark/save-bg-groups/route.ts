@@ -6,8 +6,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as { benchmarkPostId?: string; groups?: number[][] }
     const { benchmarkPostId, groups } = body
 
-    if (!benchmarkPostId || !groups || !Array.isArray(groups)) {
-      return NextResponse.json({ error: "benchmarkPostId と groups は必須" }, { status: 400 })
+    if (!benchmarkPostId) {
+      return NextResponse.json({ error: "benchmarkPostId は必須" }, { status: 400 })
+    }
+    // groups: null = 解除、配列 = 設定
+    if (groups !== null && !Array.isArray(groups)) {
+      return NextResponse.json({ error: "groups は配列または null である必要があります" }, { status: 400 })
     }
 
     await dbUpdateBackgroundGroups(benchmarkPostId, groups)
