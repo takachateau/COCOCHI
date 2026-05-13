@@ -57,8 +57,9 @@ export async function POST(req: NextRequest) {
       types?: { hookType: HookType; structureType: StructureType; compositionType: CompositionType }
       slideIndex?: number
       benchmarkFolderPath?: string
+      instruction?: string   // ユーザー追加指示（例: "背景をカフェに", "テキストを白に"）
     }
-    const { slide, personaId, postType, productId, types, slideIndex, benchmarkFolderPath } = body
+    const { slide, personaId, postType, productId, types, slideIndex, benchmarkFolderPath, instruction } = body
 
     if (!slide || !personaId || !postType || slideIndex === undefined) {
       return NextResponse.json({ error: "slide, personaId, postType, slideIndex は必須" }, { status: 400 })
@@ -116,6 +117,7 @@ export async function POST(req: NextRequest) {
       colorPalette,
       refImageUrl,
       styleDescription,
+      instruction: instruction || undefined,
     })
 
     if (!result.buffer) {

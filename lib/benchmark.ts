@@ -312,8 +312,9 @@ export async function uploadAndAnalyzePost(params: {
     folderPath,
     slideUrls,
     caption,
-    slideStyleDescs: null,  // 画像生成時に初回分析してキャッシュされる
-    isHidden: false,
+    slideStyleDescs:  null,  // 画像生成時に初回分析してキャッシュされる
+    isHidden:         false,
+    backgroundGroups: null,  // ベンチマーク登録後に手動検出・確認
     ...analysis,
   })
 

@@ -291,21 +291,26 @@ export async function POST(req: NextRequest) {
     const compositionHint = types ? COMPOSITION_HINTS[types.compositionType] : ""
     const colorPalette = detectColorPalette(persona.themeTags)
 
-    // 各スライドを並列生成（Promise.allSettled: 1枚失敗しても他を道連れにしない）
-    const settled = await Promise.allSettled(slides.map(async (slide, i) => {
-      const refImageUrl = slideRefUrls[i]
+    type SlideResult = { buffer: Buffer | null; policyFallback: boolean; falCalls: number; slideNumber: number; index: number }
 
+    // ─ 背景グループ対応生成 ────────────────────────────────────────
+    // backgroundGroups があれば: グループ内1枚目を生成→残りはその結果を背景参照として渡す
+    // なければ: 従来通り全スライド並列生成
+    const backgroundGroups = refBenchmark.backgroundGroups  // number[][] | null
+    let usedBgGroupMode = false
+
+    async function generateOneSlide(
+      i: number,
+      overrideRefImageUrl?: string,  // 背景グループの1枚目生成結果を上書き参照に使う
+    ): Promise<SlideResult> {
+      const slide = slides[i]
+      const refImageUrl = overrideRefImageUrl ?? slideRefUrls[i]
       const slideProduct = (postType === "product" || postType === "mixed")
         ? pickProductForSlide(slide, product, competitors, postType)
         : null
-
-      if (slideProduct) {
-        console.log(`[v4/generate-image] slide ${i + 1} → FAL (product: ${slideProduct.displayName})`)
-      }
-
-      const slideStyleDesc = refImageUrl ? (styleDescMap.get(refImageUrl) ?? "") : ""
+      const slideStyleDesc = refImageUrl ? (styleDescMap.get(overrideRefImageUrl ? slideRefUrls[i] : refImageUrl) ?? "") : ""
       const finalStyleDesc  = [slideStyleDesc, compositionHint].filter(Boolean).join("  ")
-      console.log(`[v4/generate-image] slide ${i + 1} → FAL`)
+      console.log(`[v4/generate-image] slide ${i + 1} → FAL${overrideRefImageUrl ? " (bg-inherit)" : ""}`)
       const result = await generateV2Slide({
         headline:         slide.headline,
         tag:              slide.tag,
@@ -320,22 +325,73 @@ export async function POST(req: NextRequest) {
         productImageUrl:  slideProduct?.imageUrl,
       })
       return { ...result, slideNumber: slide.slideNumber, index: i }
-    }))
+    }
 
-    // settled 結果を整理: 失敗 or buffer=null のスライドは null URL にする
-    type SlideResult = { buffer: Buffer | null; policyFallback: boolean; falCalls: number; slideNumber: number; index: number }
-    const slideResults: SlideResult[] = settled.map((s, i) =>
-      s.status === "fulfilled"
-        ? s.value
-        : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i },
-    )
+    const slideResults: SlideResult[] = new Array(slides.length)
 
-    // null でないバッファだけアップロード
-    const toUpload = slideResults.filter((r): r is SlideResult & { buffer: Buffer } => r.buffer !== null)
+    if (backgroundGroups && backgroundGroups.length > 0) {
+      usedBgGroupMode = true
+      // グループ単位で処理: グループ内は直列・グループ間は並列
+      await Promise.all(backgroundGroups.map(async (group) => {
+        // ベンチマークのスライドインデックスが生成スライドの配列インデックスに対応
+        const validIndices = group.filter(bi => bi < slides.length)
+        if (validIndices.length === 0) return
+
+        if (validIndices.length === 1) {
+          // ソログループ: 通常生成
+          const result = await generateOneSlide(validIndices[0]).catch(() =>
+            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[validIndices[0]].slideNumber, index: validIndices[0] } as SlideResult)
+          )
+          slideResults[validIndices[0]] = result
+          return
+        }
+
+        // 複数スライドが同背景: 1枚目を生成してアップロード、以降はその URL を参照
+        const first = validIndices[0]
+        const firstResult = await generateOneSlide(first).catch(() =>
+          ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[first].slideNumber, index: first } as SlideResult)
+        )
+        slideResults[first] = firstResult
+
+        // 1枚目が成功したらアップロードして URL を取得
+        let groupRefUrl: string | undefined
+        if (firstResult.buffer) {
+          const [url] = await uploadSlideBuffers([firstResult.buffer])
+          groupRefUrl = url
+          // アップロード済みなのでバッファを null に（二重アップロード防止）
+          slideResults[first] = { ...firstResult, buffer: null, _uploadedUrl: url } as SlideResult & { _uploadedUrl: string }
+        }
+
+        // 2枚目以降: 直列で生成（1枚目の生成結果を背景参照として渡す）
+        for (const bi of validIndices.slice(1)) {
+          if (bi >= slides.length) continue
+          const result = await generateOneSlide(bi, groupRefUrl).catch(() =>
+            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi } as SlideResult)
+          )
+          slideResults[bi] = result
+        }
+      }))
+    } else {
+      // 従来通り: 全スライド並列生成
+      const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
+      settled.forEach((s, i) => {
+        slideResults[i] = s.status === "fulfilled"
+          ? s.value
+          : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i }
+      })
+    }
+
+    // null でないバッファだけアップロード（背景グループ1枚目は既アップロード済みなので除く）
+    const toUpload = slideResults.filter((r): r is SlideResult & { buffer: Buffer } => r?.buffer !== null && r?.buffer !== undefined)
     const uploadedUrls = toUpload.length > 0 ? await uploadSlideBuffers(toUpload.map(r => r.buffer)) : []
 
     // スライド順に URL を復元（生成失敗スライドは null）
     const urlByIndex = new Map<number, string>()
+    // 背景グループ1枚目の既アップロード済み URL を先に入れる
+    slideResults.forEach((r, i) => {
+      const ext = r as SlideResult & { _uploadedUrl?: string }
+      if (ext?._uploadedUrl) urlByIndex.set(i, ext._uploadedUrl)
+    })
     toUpload.forEach((r, ui) => urlByIndex.set(r.index, uploadedUrls[ui]))
     const imageUrls = slides.map((_, i) => urlByIndex.get(i) ?? null)
 
@@ -362,6 +418,8 @@ export async function POST(req: NextRequest) {
       policyFallbackSlides,
       failedSlides,       // 生成完全失敗したスライド番号一覧
       imageCost,          // { jpy, cny, usd }
+      usedBgGroupMode,    // true = 同背景グループ生成を使用（一括再生成ボタンを表示するため）
+      backgroundGroups: refBenchmark.backgroundGroups ?? null,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

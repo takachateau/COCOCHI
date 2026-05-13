@@ -53,7 +53,7 @@ export default function TestGeneratePage() {
   const [selectedBenchmarkPath, setSelectedBenchmarkPath] = useState<string | null>(null)  // null = ランダム
   const [phase, setPhase]         = useState<Phase>("idle")
   const [textResult, setTextResult]   = useState<{ types: Types; generated: GeneratedPostText } | null>(null)
-  const [imageResult, setImageResult] = useState<{ imageUrls: (string | null)[]; refBenchmark: string; policyFallbackSlides: number[]; failedSlides: number[] } | null>(null)
+  const [imageResult, setImageResult] = useState<{ imageUrls: (string | null)[]; refBenchmark: string; policyFallbackSlides: number[]; failedSlides: number[]; usedBgGroupMode?: boolean; backgroundGroups?: number[][] } | null>(null)
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null)
   const [enqueuing, setEnqueuing] = useState(false)
   const [enqueueToast, setEnqueueToast] = useState<string | null>(null)  // 成功トースト
@@ -63,6 +63,11 @@ export default function TestGeneratePage() {
   interface CostDisplay { jpy: string; cny: string; usd: string }
   const [textCost, setTextCost]   = useState<CostDisplay | null>(null)
   const [imageCost, setImageCost] = useState<CostDisplay | null>(null)
+
+  // ① per-slide instruction input
+  const [slideInstructions, setSlideInstructions] = useState<Record<number, string>>({})
+  // ② background group bulk regen
+  const [bulkRegenBgGroupLoading, setBulkRegenBgGroupLoading] = useState(false)
 
   // 初期データ取得
   useEffect(() => {
@@ -116,6 +121,7 @@ export default function TestGeneratePage() {
     setImageResult(null)
     setTextCost(null)
     setImageCost(null)
+    setSlideInstructions({})
 
     try {
       // ─── テキスト生成 ───
@@ -155,10 +161,10 @@ export default function TestGeneratePage() {
           benchmarkFolderPath: selectedBenchmarkPath ?? d1.refBenchmark,  // 手動選択 > テキスト生成時の自動選択
         }),
       })
-      const d2 = await r2.json() as { imageUrls?: (string | null)[]; refBenchmark?: string; policyFallbackSlides?: number[]; failedSlides?: number[]; error?: string; imageCost?: CostDisplay }
+      const d2 = await r2.json() as { imageUrls?: (string | null)[]; refBenchmark?: string; policyFallbackSlides?: number[]; failedSlides?: number[]; error?: string; imageCost?: CostDisplay; usedBgGroupMode?: boolean; backgroundGroups?: number[][] }
       if (d2.error) throw new Error(d2.error)
       if (!d2.imageUrls) throw new Error("画像生成失敗")
-      setImageResult({ imageUrls: d2.imageUrls, refBenchmark: d2.refBenchmark ?? "", policyFallbackSlides: d2.policyFallbackSlides ?? [], failedSlides: d2.failedSlides ?? [] })
+      setImageResult({ imageUrls: d2.imageUrls, refBenchmark: d2.refBenchmark ?? "", policyFallbackSlides: d2.policyFallbackSlides ?? [], failedSlides: d2.failedSlides ?? [], usedBgGroupMode: d2.usedBgGroupMode, backgroundGroups: d2.backgroundGroups })
       if (d2.imageCost) setImageCost(d2.imageCost)
 
       // 生成結果を Supabase に保存（非ブロッキング）
@@ -223,6 +229,7 @@ export default function TestGeneratePage() {
     if (regeneratingIndex !== null) return
     setRegeneratingIndex(slideIndex)
     setError("")
+    const instruction = slideInstructions[slideIndex]?.trim() || undefined
     try {
       const r = await fetch("/api/v4/regenerate-slide", {
         method: "POST",
@@ -235,6 +242,7 @@ export default function TestGeneratePage() {
           types:                textResult.types,
           slideIndex,
           benchmarkFolderPath:  imageResult.refBenchmark,
+          instruction,
         }),
       })
       const d = await r.json() as { imageUrl?: string; policyFallback?: boolean; error?: string }
@@ -256,6 +264,46 @@ export default function TestGeneratePage() {
       setError(e instanceof Error ? e.message : "再生成失敗")
     } finally {
       setRegeneratingIndex(null)
+    }
+  }
+
+  // ② 同背景グループのスライドを一括再生成
+  async function handleBulkRegenBgGroups() {
+    if (!textResult || !imageResult?.backgroundGroups) return
+    setBulkRegenBgGroupLoading(true)
+    setError("")
+    try {
+      const multiGroups = imageResult.backgroundGroups.filter(g => g.length > 1)
+      // 各グループを順次再生成
+      for (const group of multiGroups) {
+        const r = await fetch("/api/v4/regenerate-bg-group", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slideIndices:        group,
+            slides:              group.map(i => textResult.generated.slides[i]),
+            personaId,
+            postType,
+            productId:           (postType === "product" || postType === "mixed") ? productId : undefined,
+            types:               textResult.types,
+            benchmarkFolderPath: imageResult.refBenchmark,
+          }),
+        })
+        const d = await r.json() as { imageUrls?: (string | null)[]; policyFallbackSlides?: number[]; error?: string }
+        if (d.error) throw new Error(d.error)
+        if (d.imageUrls) {
+          setImageResult(prev => {
+            if (!prev) return prev
+            const updated = [...prev.imageUrls]
+            group.forEach((slideIdx, j) => { updated[slideIdx] = d.imageUrls![j] ?? null })
+            return { ...prev, imageUrls: updated }
+          })
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "一括再生成失敗")
+    } finally {
+      setBulkRegenBgGroupLoading(false)
     }
   }
 
@@ -611,6 +659,27 @@ export default function TestGeneratePage() {
             {textResult.generated.overallTitle}
           </h2>
 
+          {/* ─── 同背景グループモードインジケーター ─── */}
+          {imageResult?.usedBgGroupMode && (
+            <div className="mt-2 flex items-center justify-between gap-3 px-3 py-2 rounded-xl"
+              style={{ background: "#0891b222", border: "1px solid #0891b2" }}>
+              <div className="flex items-center gap-2 text-xs font-bold" style={{ color: "#0891b2" }}>
+                <span>🔗</span>
+                同背景グループモード使用中 — 結果が良くない場合は一括再生成できます
+              </div>
+              <button
+                onClick={handleBulkRegenBgGroups}
+                disabled={bulkRegenBgGroupLoading || regeneratingIndex !== null}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-50 flex-shrink-0"
+                style={{ background: "#0891b2" }}
+              >
+                {bulkRegenBgGroupLoading
+                  ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />再生成中...</>
+                  : <><RefreshCw className="w-3 h-3" />同背景スライドを一括再生成</>}
+              </button>
+            </div>
+          )}
+
           {/* ─── AI コスト表示 ─── */}
           {(textCost || imageCost) && (() => {
             const parseUsd = (s?: string) => parseFloat(s?.replace("$", "") ?? "0") || 0
@@ -719,6 +788,30 @@ export default function TestGeneratePage() {
                   </div>
                 )}
                 </div>{/* /relative */}
+
+                {/* ① 修正指示入力（再生成時に使用） */}
+                {imageResult?.imageUrls?.[i] && (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={slideInstructions[i] ?? ""}
+                      onChange={e => setSlideInstructions(prev => ({ ...prev, [i]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleRegenerateSlide(i) }}
+                      placeholder="修正指示（例: 背景をカフェに）"
+                      disabled={regeneratingIndex !== null || generating}
+                      className="flex-1 px-2 py-1 rounded-lg border text-[10px] outline-none disabled:opacity-50"
+                      style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                    />
+                    <button
+                      onClick={() => handleRegenerateSlide(i)}
+                      disabled={regeneratingIndex !== null || generating}
+                      className="flex-shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-40"
+                      style={{ background: "var(--accent)" }}
+                    >
+                      <RefreshCw className={`w-3 h-3 ${regeneratingIndex === i ? "animate-spin" : ""}`} />
+                    </button>
+                  </div>
+                )}
 
                 {/* ポリシー違反フォールバック通知（画像の外・下に表示） */}
                 {imageResult?.policyFallbackSlides?.includes(slide.slideNumber) && (
