@@ -228,15 +228,30 @@ export default function BenchmarkPage() {
 
   function cycleSlideGroup(slideIndex: number) {
     if (!bgGroupState) return
-    const currentGroup = bgGroupState.groups.findIndex(g => g.includes(slideIndex))
-    const numGroups = bgGroupState.groups.length
-    // 次のグループへ（最後 → 新規グループ作成、グループが6以上なら先頭に戻る）
-    const nextGroup = numGroups < 6 ? (currentGroup + 1) % (numGroups + 1) : (currentGroup + 1) % numGroups
 
+    const originalGroup = bgGroupState.groups.findIndex(g => g.includes(slideIndex))
+    const wasAlone = bgGroupState.groups[originalGroup]?.length === 1
+
+    // このスライドを取り除いた後のグループ配列（空グループは削除・先頭インデックス順に整列）
     const filtered = bgGroupState.groups
       .map(g => g.filter(i => i !== slideIndex))
       .filter(g => g.length > 0)
       .sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0))
+
+    // filtered内での現グループ位置を特定
+    // ソログループだった場合はそのグループ自体が消えているので末尾扱い（→次は0番に戻る）
+    let posInFiltered: number
+    if (wasAlone) {
+      posInFiltered = filtered.length - 1
+    } else {
+      const sibling = bgGroupState.groups[originalGroup].find(i => i !== slideIndex)!
+      posInFiltered = filtered.findIndex(g => g.includes(sibling))
+    }
+
+    // ソログループだったときは新規グループを作らず0番に戻す（1周してきた）
+    const canCreateNew = !wasAlone && filtered.length < 6
+    const cycleLen = canCreateNew ? filtered.length + 1 : filtered.length
+    const nextGroup = (posInFiltered + 1) % cycleLen
 
     if (nextGroup < filtered.length) {
       filtered[nextGroup] = [...filtered[nextGroup], slideIndex].sort((a, b) => a - b)
