@@ -4,9 +4,9 @@
     {
       "name": "cocochi-v3-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "3099"],
+      "runtimeArgs": ["run", "dev", "--", "--port", "3003"],
       "cwd": "/Users/takaakikanasashi/my-company/project_COCOCHI/development/cocochi_v3",
-      "port": 3099
+      "port": 3003
     }
   ]
 }

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader } from "lucide-react"
+import { ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader, StopCircle } from "lucide-react"
 import type { GenerationJob } from "@/types/v2"
 import { useLanguage } from "@/context/language"
 import { useT } from "@/lib/i18n"
@@ -24,8 +24,9 @@ const STATUS_ICONS = {
   pending:          { icon: Clock,        color: "#6b7280" },
   text_generating:  { icon: Loader,       color: "#0891b2" },
   image_generating: { icon: Loader,       color: "#7c3aed" },
-  done:             { icon: CheckCircle, color: "#16a34a" },
-  error:            { icon: AlertCircle, color: "#ef4444" },
+  done:             { icon: CheckCircle,  color: "#16a34a" },
+  error:            { icon: AlertCircle,  color: "#ef4444" },
+  cancelled:        { icon: StopCircle,   color: "#9ca3af" },
 }
 
 // ─── キューパネル ─────────────────────────────────────────────────
@@ -34,6 +35,7 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
   const t = useT(lang)
   const [jobs, setJobs] = useState<GenerationJob[]>([])
   const [loading, setLoading] = useState(true)
+  const [cancelling, setCancelling] = useState<Set<string>>(new Set())
 
   function formatElapsed(createdAt: string): string {
     const diff = (Date.now() - new Date(createdAt).getTime()) / 1000
@@ -49,6 +51,18 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
       case "image_generating": return t.queue.statusImageGen
       case "done":             return t.queue.statusDone
       case "error":            return t.queue.statusError
+      case "cancelled":        return "キャンセル済"
+    }
+  }
+
+  async function cancelJob(e: React.MouseEvent, jobId: string) {
+    e.stopPropagation()
+    setCancelling(prev => new Set(prev).add(jobId))
+    try {
+      await fetch(`/api/v4/jobs/${jobId}/cancel`, { method: "POST" })
+      await fetchJobs()
+    } finally {
+      setCancelling(prev => { const s = new Set(prev); s.delete(jobId); return s })
     }
   }
 
@@ -111,96 +125,118 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
             {t.queue.empty}
           </div>
         ) : (
-          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+          <div>
             {jobs.map(job => {
               const cfg = STATUS_ICONS[job.status]
               const Icon = cfg.icon
               const label = getStatusLabel(job.status)
               const isActive = job.status === "text_generating" || job.status === "image_generating"
+              const isPending = job.status === "pending"
               const isDone = job.status === "done"
+              const isCancellable = isActive || isPending
+              const isCancelling = cancelling.has(job.id)
               return (
-                <button
+                <div
                   key={job.id}
-                  type="button"
-                  disabled={!isDone}
-                  onClick={() => isDone && onSelectJob(job)}
-                  className="w-full text-left px-4 py-3 flex items-start gap-3 transition-opacity"
-                  style={{
-                    opacity: 1,
-                    cursor: isDone ? "pointer" : "default",
-                    background: isDone ? "transparent" : "transparent",
-                  }}
-                  onMouseEnter={e => { if (isDone) (e.currentTarget as HTMLButtonElement).style.background = "var(--accent-light)" }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent" }}
+                  className="flex items-start gap-2 px-4 py-3 [&:not(:last-child)]:border-b"
+                  style={{ borderColor: "var(--border)" }}
                 >
-                  <div className="flex-shrink-0 mt-0.5">
-                    <Icon
-                      className={`w-4 h-4 ${isActive ? "animate-spin" : ""}`}
-                      style={{ color: cfg.color }}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span
-                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                        style={{ background: `${cfg.color}22`, color: cfg.color }}
-                      >
-                        {label}
-                      </span>
-                      <span className="text-[10px]" style={{ color: "var(--muted)" }}>
-                        {formatElapsed(job.createdAt)}
-                      </span>
+                  {/* メイン行（クリックで結果表示） */}
+                  <button
+                    type="button"
+                    disabled={!isDone}
+                    onClick={() => isDone && onSelectJob(job)}
+                    className="flex-1 text-left flex items-start gap-3 transition-opacity min-w-0"
+                    style={{
+                      cursor: isDone ? "pointer" : "default",
+                    }}
+                    onMouseEnter={e => { if (isDone) (e.currentTarget as HTMLButtonElement).style.opacity = "0.8" }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = "1" }}
+                  >
+                    <div className="flex-shrink-0 mt-0.5">
+                      <Icon
+                        className={`w-4 h-4 ${isActive ? "animate-spin" : ""}`}
+                        style={{ color: cfg.color }}
+                      />
                     </div>
-                    <p className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>
-                      {job.personaName ?? job.personaId} — {job.postType}
-                    </p>
-                    {job.textResult?.generated.overallTitle && (
-                      <p className="text-[10px] truncate mt-0.5" style={{ color: "var(--muted)" }}>
-                        {job.textResult.generated.overallTitle}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{ background: `${cfg.color}22`, color: cfg.color }}
+                        >
+                          {label}
+                        </span>
+                        <span className="text-[10px]" style={{ color: "var(--muted)" }}>
+                          {formatElapsed(job.createdAt)}
+                        </span>
+                      </div>
+                      <p className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>
+                        {job.personaName ?? job.personaId} — {job.postType}
                       </p>
-                    )}
-                    {job.errorMessage && (
-                      <p className="text-[10px] mt-0.5 line-clamp-2" style={{ color: "#ef4444" }}>
-                        {job.errorMessage}
-                      </p>
-                    )}
-                    {isDone && (
-                      <p className="text-[10px] mt-0.5" style={{ color: "#16a34a" }}>
-                        {t.queue.clickToView}
-                      </p>
-                    )}
-                    {isDone && (() => {
-                      // DB保存されたコスト or スライド数から推定
-                      const cost = job.imageCost
-                      if (cost) {
-                        return (
-                          <p className="text-[11px] font-medium mt-0.5" style={{ color: "var(--accent)" }}>
-                            💴 {cost.jpy} / {cost.usd}
-                          </p>
-                        )
-                      }
-                      // フォールバック: スライド数から推定（DB保存前の旧ジョブ用）
-                      const successCount = (job.imageUrls ?? []).filter(Boolean).length
-                      if (successCount > 0) {
-                        const hasProduct = job.postType === "product" || job.postType === "mixed"
-                        const perCall = hasProduct ? 0.06 : 0.04
-                        const estimatedJpy = Math.round(successCount * perCall * 155)
-                        return (
-                          <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
-                            💴 約¥{estimatedJpy}〜（推定）
-                          </p>
-                        )
-                      }
-                      return null
-                    })()}
-                  </div>
-                  {isDone && job.imageUrls && (
-                    <div className="flex-shrink-0">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      {job.imageUrls[0] && <img src={job.imageUrls[0]} alt="" className="w-10 rounded" style={{ aspectRatio: "3/4", objectFit: "cover" }} />}
+                      {job.textResult?.generated.overallTitle && (
+                        <p className="text-[10px] truncate mt-0.5" style={{ color: "var(--muted)" }}>
+                          {job.textResult.generated.overallTitle}
+                        </p>
+                      )}
+                      {job.errorMessage && (
+                        <p className="text-[10px] mt-0.5 line-clamp-2" style={{ color: job.status === "cancelled" ? "#9ca3af" : "#ef4444" }}>
+                          {job.errorMessage}
+                        </p>
+                      )}
+                      {isDone && (
+                        <p className="text-[10px] mt-0.5" style={{ color: "#16a34a" }}>
+                          {t.queue.clickToView}
+                        </p>
+                      )}
+                      {isDone && (() => {
+                        const cost = job.imageCost
+                        if (cost) {
+                          return (
+                            <p className="text-[11px] font-medium mt-0.5" style={{ color: "var(--accent)" }}>
+                              💴 {cost.jpy} / {cost.usd}
+                            </p>
+                          )
+                        }
+                        const successCount = (job.imageUrls ?? []).filter(Boolean).length
+                        if (successCount > 0) {
+                          const hasProduct = job.postType === "product" || job.postType === "mixed"
+                          const perCall = hasProduct ? 0.06 : 0.04
+                          const estimatedJpy = Math.round(successCount * perCall * 155)
+                          return (
+                            <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
+                              💴 約¥{estimatedJpy}〜（推定）
+                            </p>
+                          )
+                        }
+                        return null
+                      })()}
                     </div>
+                    {isDone && job.imageUrls && (
+                      <div className="flex-shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        {job.imageUrls[0] && <img src={job.imageUrls[0]} alt="" className="w-10 rounded" style={{ aspectRatio: "3/4", objectFit: "cover" }} />}
+                      </div>
+                    )}
+                  </button>
+
+                  {/* 中止ボタン（処理中・待機中のみ表示） */}
+                  {isCancellable && (
+                    <button
+                      type="button"
+                      onClick={e => cancelJob(e, job.id)}
+                      disabled={isCancelling}
+                      className="flex-shrink-0 mt-0.5 w-6 h-6 rounded flex items-center justify-center transition-opacity hover:opacity-70 disabled:opacity-40"
+                      style={{ background: "#ef444422", color: "#ef4444" }}
+                      title="生成を中止する"
+                    >
+                      {isCancelling
+                        ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                        : <StopCircle className="w-3.5 h-3.5" />
+                      }
+                    </button>
                   )}
-                </button>
+                </div>
               )
             })}
           </div>

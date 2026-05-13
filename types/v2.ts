@@ -198,7 +198,7 @@ export interface GeneratedPost {
 
 // ─── v4: 生成キュー ──────────────────────────────────────────────
 
-export type JobStatus = "pending" | "text_generating" | "image_generating" | "done" | "error"
+export type JobStatus = "pending" | "text_generating" | "image_generating" | "done" | "error" | "cancelled"
 
 export interface SlideRegenParams {
   generatedPostId: string   // 更新対象の generated_posts.id
