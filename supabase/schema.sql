@@ -228,7 +228,8 @@ create table if not exists generation_jobs (
   ref_benchmark         text,
   policy_fallback_slides jsonb,
   failed_slides         jsonb,
-  error_message         text
+  error_message         text,
+  image_cost            jsonb
 );
 
 create index if not exists generation_jobs_created_idx on generation_jobs (created_at desc);
@@ -243,6 +244,11 @@ create policy "dev_allow_all" on generation_jobs for all using (true) with check
 --
 -- ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS job_type text NOT NULL DEFAULT 'post_gen';
 -- ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS slide_regen_params jsonb;
+
+-- ─── コスト記録対応 ──────────────────────────────────────────────────
+-- Supabase Dashboard → SQL Editor で以下を実行すること。
+--
+-- ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS image_cost jsonb;
 
 -- ─── ゴミ箱（ソフトデリート）対応 ──────────────────────────────────
 -- Supabase Dashboard → SQL Editor で以下を実行すること。

@@ -13,8 +13,9 @@ import {
 import { loadProducts } from "@/lib/products"
 import { selectTypeCombination, generateV3Post, isDuplicatePost } from "@/lib/v3Generate"
 import { describeV3SlideStyle } from "@/lib/referenceV2"
-import { generateV2Slide } from "@/lib/fal"
+import { generateV2Slide, generateBaseSlide } from "@/lib/fal"
 import { uploadSlideBuffers } from "@/lib/storage"
+import { calcFalCost, formatCost } from "@/lib/aiCost"
 import type { PostType, CompositionType, HookType, StructureType, GeneratedSlide, CompetitorProduct } from "@/types/v2"
 import type { Product } from "@/types"
 
@@ -345,37 +346,133 @@ export async function POST(
     const visualProfile = persona.visualProfile ?? undefined
     const personaHint = visualProfile ? undefined : extractPersonaVisual(persona.characterText)
 
-    const settled = await Promise.allSettled(slides.map(async (slide, i) => {
-      const refImageUrl = slideRefUrls[i]
-      const slideProduct = (job.postType === "product" || job.postType === "mixed")
-        ? pickProductForSlide(slide, product, competitors, job.postType as PostType)
+    type SlideResult = { buffer: Buffer | null; policyFallback: boolean; falCalls: number; slideNumber: number; index: number }
+
+    const jobPostType = job.postType as PostType
+
+    async function generateOneSlide(
+      i: number,
+      overrideRefImageUrl?: string,
+    ): Promise<SlideResult> {
+      const slide = slides[i]
+      const refImageUrl = overrideRefImageUrl ?? slideRefUrls[i]
+      const slideProduct = (jobPostType === "product" || jobPostType === "mixed")
+        ? pickProductForSlide(slide, product, competitors, jobPostType)
         : null
-      const slideStyleDesc = refImageUrl ? (styleDescMap.get(refImageUrl) ?? "") : ""
+      const slideStyleDesc = slideRefUrls[i] ? (styleDescMap.get(slideRefUrls[i]) ?? "") : ""
       const finalStyleDesc = [slideStyleDesc, compositionHint].filter(Boolean).join("  ")
+      console.log(`[v4/process] slide ${i + 1} → FAL${overrideRefImageUrl ? " (bg-inherit)" : ""}`)
       const result = await generateV2Slide({
         headline: slide.headline, tag: slide.tag, bullets: slide.bullets, accent: slide.accent,
         colorPalette, refImageUrl, styleDescription: finalStyleDesc,
         slideNumber: slide.slideNumber, visualProfile, personaHint,
         productImageUrl: slideProduct?.imageUrl,
+        bgInherit: !!overrideRefImageUrl,
       })
       return { ...result, slideNumber: slide.slideNumber, index: i }
-    }))
+    }
 
-    type SlideResult = { buffer: Buffer | null; policyFallback: boolean; slideNumber: number; index: number }
-    const slideResults: SlideResult[] = settled.map((s, i) =>
-      s.status === "fulfilled"
-        ? s.value
-        : { buffer: null, policyFallback: false, slideNumber: slides[i].slideNumber, index: i },
-    )
+    // 背景グループ対応: 同背景スライドをグループ化してベース画像を共有
+    // 競合比較投稿は自動で全スライドを1グループ化（同一背景を強制）
+    const rawBackgroundGroups = selectedBenchmark!.backgroundGroups as number[][] | null | undefined
+    const backgroundGroups = rawBackgroundGroups ??
+      (competitors.length > 0 ? [slides.map((_, i) => i)] : null)
 
-    const toUpload = slideResults.filter((r): r is SlideResult & { buffer: Buffer } => r.buffer !== null)
+    const slideResults: SlideResult[] = new Array(slides.length)
+
+    if (backgroundGroups && backgroundGroups.length > 0) {
+      await Promise.all(backgroundGroups.map(async (group) => {
+        const validIndices = group.filter(bi => bi < slides.length)
+        if (validIndices.length === 0) return
+
+        if (validIndices.length === 1) {
+          slideResults[validIndices[0]] = await generateOneSlide(validIndices[0]).catch(() =>
+            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[validIndices[0]].slideNumber, index: validIndices[0] } as SlideResult)
+          )
+          return
+        }
+
+        // 複数スライドが同背景: 素背景を先に1枚生成してから全スライドに使い回す
+        const first = validIndices[0]
+        const firstStyleDesc = styleDescMap.get(slideRefUrls[first]) ?? ""
+        console.log(`[v4/process] group ${JSON.stringify(validIndices)}: 素背景を生成中...`)
+        const baseResult = await generateBaseSlide({
+          refImageUrl:      slideRefUrls[first],
+          styleDescription: [firstStyleDesc, compositionHint].filter(Boolean).join("  "),
+          colorPalette,
+          visualProfile,
+          personaHint,
+        })
+
+        let groupBaseUrl: string | undefined
+        if (baseResult.buffer) {
+          const [url] = await uploadSlideBuffers([baseResult.buffer])
+          groupBaseUrl = url
+          console.log(`[v4/process] 素背景アップロード完了: ${url.slice(0, 60)}`)
+        } else {
+          // 素背景生成失敗: 旧来フォールバック（1枚目を通常生成して残りの参照に使う）
+          console.warn(`[v4/process] 素背景生成失敗 — フォールバック`)
+          const firstResult = await generateOneSlide(first).catch(() =>
+            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[first].slideNumber, index: first } as SlideResult)
+          )
+          slideResults[first] = firstResult
+          if (firstResult.buffer) {
+            const [url] = await uploadSlideBuffers([firstResult.buffer])
+            groupBaseUrl = url
+            slideResults[first] = { ...firstResult, buffer: null, _uploadedUrl: url } as SlideResult & { _uploadedUrl: string }
+          }
+          for (const bi of validIndices.slice(1)) {
+            if (bi >= slides.length) continue
+            slideResults[bi] = await generateOneSlide(bi, groupBaseUrl).catch(() =>
+              ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi } as SlideResult)
+            )
+          }
+          return
+        }
+
+        // 素背景取得成功: 全スライドを並列生成
+        const groupSettled = await Promise.allSettled(
+          validIndices.filter(bi => bi < slides.length).map(bi => generateOneSlide(bi, groupBaseUrl))
+        )
+        groupSettled.forEach((r, idx) => {
+          const bi = validIndices[idx]
+          slideResults[bi] = r.status === "fulfilled"
+            ? r.value
+            : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi }
+        })
+      }))
+    } else {
+      // 背景グループなし: 全スライド並列生成（従来通り）
+      const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
+      settled.forEach((s, i) => {
+        slideResults[i] = s.status === "fulfilled"
+          ? s.value
+          : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i }
+      })
+    }
+
+    // null でないバッファだけアップロード（素背景フォールバック時の1枚目は既アップロード済みなので除く）
+    const toUpload = slideResults.filter((r): r is SlideResult & { buffer: Buffer } => r?.buffer !== null && r?.buffer !== undefined)
     const uploadedUrls = toUpload.length > 0 ? await uploadSlideBuffers(toUpload.map(r => r.buffer)) : []
     const urlByIndex = new Map<number, string>()
+    slideResults.forEach((r, i) => {
+      const ext = r as SlideResult & { _uploadedUrl?: string }
+      if (ext?._uploadedUrl) urlByIndex.set(i, ext._uploadedUrl)
+    })
     toUpload.forEach((r, ui) => urlByIndex.set(r.index, uploadedUrls[ui]))
     const imageUrls = slides.map((_, i) => urlByIndex.get(i) ?? null)
 
     const policyFallbackSlides = slideResults.filter(r => r.policyFallback && r.buffer !== null).map(r => r.slideNumber)
     const failedSlides = slideResults.filter(r => r.buffer === null).map(r => r.slideNumber)
+
+    // コスト計算
+    const totalFalCalls = slideResults.reduce((s, r) => s + (r?.falCalls ?? 1), 0)
+    const hasImageSlides = slideResults.some((_, i) => {
+      const slide = slides[i]
+      return (jobPostType === "product" || jobPostType === "mixed") &&
+        pickProductForSlide(slide, product, competitors, jobPostType) !== null
+    })
+    const imageCost = formatCost(calcFalCost(totalFalCalls, hasImageSlides))
 
     await dbUpdateJob(jobId, {
       status: "done",
@@ -383,6 +480,7 @@ export async function POST(
       refBenchmark: selectedBenchmark!.folderPath,
       policyFallbackSlides,
       failedSlides,
+      imageCost,
     })
 
     // 生成結果を generated_posts にも保存（結果ページで表示するため）

@@ -169,6 +169,11 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                         {t.queue.clickToView}
                       </p>
                     )}
+                    {isDone && job.imageCost && (
+                      <p className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>
+                        {job.imageCost.jpy} / {job.imageCost.usd}
+                      </p>
+                    )}
                   </div>
                   {isDone && job.imageUrls && (
                     <div className="flex-shrink-0">

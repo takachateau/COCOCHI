@@ -223,6 +223,7 @@ export interface GenerationJob {
   policyFallbackSlides?: number[]
   failedSlides?: number[]
   errorMessage?: string
+  imageCost?: { jpy: string; cny: string; usd: string }
   createdAt: string
   updatedAt: string
   // 表示用に JOIN

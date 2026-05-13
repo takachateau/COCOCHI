@@ -773,6 +773,7 @@ function rowToJob(row: Record<string, unknown>, personaName?: string): Generatio
     policyFallbackSlides: (row.policy_fallback_slides as number[] | undefined) ?? undefined,
     failedSlides:         (row.failed_slides as number[] | undefined) ?? undefined,
     errorMessage:         (row.error_message as string | undefined) ?? undefined,
+    imageCost:            (row.image_cost as { jpy: string; cny: string; usd: string } | undefined) ?? undefined,
     createdAt:            row.created_at as string,
     updatedAt:            row.updated_at as string,
     personaName:          personaName ?? undefined,
@@ -832,6 +833,7 @@ export async function dbUpdateJob(id: string, update: {
   policyFallbackSlides?: number[]
   failedSlides?: number[]
   errorMessage?: string
+  imageCost?: GenerationJob["imageCost"]
 }): Promise<void> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (update.status             !== undefined) patch.status                 = update.status
@@ -841,6 +843,7 @@ export async function dbUpdateJob(id: string, update: {
   if (update.policyFallbackSlides !== undefined) patch.policy_fallback_slides = update.policyFallbackSlides
   if (update.failedSlides       !== undefined) patch.failed_slides          = update.failedSlides
   if (update.errorMessage       !== undefined) patch.error_message          = update.errorMessage
+  if (update.imageCost          !== undefined) patch.image_cost             = update.imageCost
   const { error } = await supabase.from("generation_jobs").update(patch).eq("id", id)
   if (error) throw new Error(`Job update error: ${error.message}`)
 }
