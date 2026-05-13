@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { PostsProvider } from "@/context/posts"
 import { ProductsProvider } from "@/context/products"
+import { LanguageProvider } from "@/context/language"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -12,9 +13,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ja">
       <body>
-        <ProductsProvider>
-          <PostsProvider>{children}</PostsProvider>
-        </ProductsProvider>
+        <LanguageProvider>
+          <ProductsProvider>
+            <PostsProvider>{children}</PostsProvider>
+          </ProductsProvider>
+        </LanguageProvider>
       </body>
     </html>
   )

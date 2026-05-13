@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { Clock, Image as ImageIcon, Trash2, ChevronLeft, ChevronRight, X, ChevronDown, ChevronUp, MoveRight, RefreshCw, ArchiveRestore, ArrowLeft } from "lucide-react"
 import type { PostType, GeneratedPost, GeneratedSlide, HookType, StructureType, CompositionType } from "@/types/v2"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
 // ─── 旧 localStorage 形式（移行用）────────────────────────────────
 const OLD_STORAGE_KEY = "cocochi_v3_results"
@@ -16,12 +18,6 @@ interface OldSavedResult {
   refBenchmark: string
 }
 
-const POST_TYPE_LABELS: Record<PostType, string> = {
-  tips:    "Tips",
-  product: "商品紹介",
-  mixed:   "混合",
-}
-
 const POST_TYPE_COLORS: Record<PostType, { bg: string; text: string }> = {
   tips:    { bg: "#2563eb22", text: "#2563eb" },
   product: { bg: "#dc262622", text: "#dc2626" },
@@ -33,6 +29,14 @@ const STRUCT_COLORS = { bg: "#0891b222", text: "#0891b2" }
 const COMP_COLORS   = { bg: "#ca8a0422", text: "#ca8a04" }
 
 export default function ResultsPage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const r_ = t.results
+  const POST_TYPE_LABELS: Record<PostType, string> = {
+    tips:    r_.postTypes.tips,
+    product: r_.postTypes.product,
+    mixed:   r_.postTypes.mixed,
+  }
   const [results, setResults]         = useState<GeneratedPost[]>([])
   const [loading, setLoading]         = useState(true)
   const [localCount, setLocalCount]   = useState(0)
@@ -219,7 +223,7 @@ export default function ResultsPage() {
 
   /** 通常一覧の削除＝ゴミ箱へ移動（ソフトデリート） */
   async function handleDelete(id: string) {
-    if (!confirm("ゴミ箱に移動しますか？")) return
+    if (!confirm(r_.confirmTrash)) return
     const r = await fetch(`/api/v4/generated-posts?id=${id}`, { method: "DELETE" })
     if (r.ok) setResults(prev => prev.filter(p => p.id !== id))
   }
@@ -232,7 +236,7 @@ export default function ResultsPage() {
 
   /** ゴミ箱から完全削除（復元不可） */
   async function handlePurge(id: string) {
-    if (!confirm("完全に削除します。復元できません。よろしいですか？")) return
+    if (!confirm(r_.confirmPermanentDelete)) return
     const r = await fetch(`/api/v4/generated-posts?id=${id}&purge=1`, { method: "DELETE" })
     if (r.ok) setResults(prev => prev.filter(p => p.id !== id))
   }
@@ -253,12 +257,10 @@ export default function ResultsPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>
-            {viewMode === "trash" ? "ゴミ箱" : "生成結果"}
+            {viewMode === "trash" ? r_.trashTitle : r_.pageTitle}
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-            {viewMode === "trash"
-              ? "削除した投稿（復元 or 完全削除ができます）"
-              : "過去の生成結果（最大500件・DB保存）"}
+            {viewMode === "trash" ? r_.trashDesc : r_.listDesc}
           </p>
         </div>
         {viewMode === "active" ? (
@@ -266,20 +268,20 @@ export default function ResultsPage() {
             onClick={() => switchMode("trash")}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
             style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}
-            title="ゴミ箱を開く"
+            title={r_.openTrash}
           >
             <Trash2 className="w-4 h-4" />
-            ゴミ箱
+            {r_.trashTitle}
           </button>
         ) : (
           <button
             onClick={() => switchMode("active")}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
             style={{ background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }}
-            title="一覧に戻る"
+            title={r_.backToList}
           >
             <ArrowLeft className="w-4 h-4" />
-            一覧に戻る
+            {r_.backToList}
           </button>
         )}
       </div>
@@ -309,7 +311,7 @@ export default function ResultsPage() {
             ) : (
               <MoveRight className="w-4 h-4" />
             )}
-            {migrating ? "移行中…" : "DBに移行する"}
+            {migrating ? r_.migrating : r_.migrateBtn}
           </button>
         </div>
       )}
@@ -330,18 +332,18 @@ export default function ResultsPage() {
 
       {/* フィルター */}
       <div className="flex gap-2 flex-wrap" suppressHydrationWarning>
-        {(["all", "tips", "product", "mixed"] as const).map(t => (
+        {(["all", "tips", "product", "mixed"] as const).map(type => (
           <button
-            key={t}
-            onClick={() => setFilterType(t)}
+            key={type}
+            onClick={() => setFilterType(type)}
             className="px-3 py-1.5 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
             style={
-              filterType === t
+              filterType === type
                 ? { background: "var(--accent)", color: "white" }
                 : { background: "var(--card)", color: "var(--text)", border: "1px solid var(--border)" }
             }
           >
-            {t === "all" ? `すべて（${results.length}件）` : POST_TYPE_LABELS[t]}
+            {type === "all" ? `すべて（${results.length}件）` : POST_TYPE_LABELS[type]}
           </button>
         ))}
       </div>
@@ -362,10 +364,8 @@ export default function ResultsPage() {
           <ImageIcon className="w-10 h-10" style={{ color: "var(--muted)" }} />
           <p className="text-sm text-center" style={{ color: "var(--muted)" }}>
             {results.length === 0
-              ? (viewMode === "trash"
-                  ? "ゴミ箱は空です"
-                  : "まだ生成結果がありません。生成テストから生成してください。")
-              : "このカテゴリの結果はありません"}
+              ? (viewMode === "trash" ? r_.trashEmpty : r_.noResults)
+              : r_.noCategoryResults}
           </p>
         </div>
       )}
@@ -404,7 +404,7 @@ export default function ResultsPage() {
                   {viewMode === "active" ? (
                     <button
                       onClick={() => handleDelete(result.id)}
-                      title="ゴミ箱に移動"
+                      title={r_.moveToTrash}
                       className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-opacity hover:opacity-80"
                       style={{ background: "#ef444422", color: "#ef4444" }}
                     >
@@ -414,7 +414,7 @@ export default function ResultsPage() {
                     <>
                       <button
                         onClick={() => handleRestore(result.id)}
-                        title="ゴミ箱から元に戻す"
+                        title={r_.restoreFromTrash}
                         className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-opacity hover:opacity-80"
                         style={{ background: "#10b98122", color: "#10b981" }}
                       >
@@ -422,7 +422,7 @@ export default function ResultsPage() {
                       </button>
                       <button
                         onClick={() => handlePurge(result.id)}
-                        title="完全に削除（復元不可）"
+                        title={r_.permanentDelete}
                         className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-opacity hover:opacity-80"
                         style={{ background: "#ef444422", color: "#ef4444" }}
                       >
@@ -448,12 +448,12 @@ export default function ResultsPage() {
                     <span
                       className="px-2 py-0.5 rounded-md text-xs font-mono"
                       style={{ background: "var(--bg)", color: "var(--muted)", border: "1px solid var(--border)" }}
-                      title="参照ベンチマーク"
+                      title={r_.refBenchmark}
                     >
                       📌 {result.refBenchmark}
                     </span>
                   )}
-                  <span className="text-xs" style={{ color: "var(--muted)" }}>{result.imageUrls.filter(Boolean).length}枚</span>
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>{result.imageUrls.filter(Boolean).length}{r_.imageCount}</span>
                 </div>
 
                 {/* スライドサムネイル */}
@@ -507,7 +507,7 @@ export default function ResultsPage() {
                   </div>
                 )}
                 {result.imageUrls.length === 0 && (
-                  <p className="text-xs" style={{ color: "var(--muted)" }}>（画像なし — テキストのみ生成）</p>
+                  <p className="text-xs" style={{ color: "var(--muted)" }}>{r_.noImage}</p>
                 )}
 
                 {/* テキスト展開ボタン */}
@@ -517,7 +517,7 @@ export default function ResultsPage() {
                   style={{ color: "var(--accent)" }}
                 >
                   {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  {isExpanded ? "テキストを閉じる" : "生成テキストを見る"}
+                  {isExpanded ? r_.hideText : r_.showText}
                 </button>
               </div>
 
@@ -555,7 +555,7 @@ export default function ResultsPage() {
                       className="rounded-xl p-3 mt-2"
                       style={{ background: "var(--card)", border: "1px solid var(--border)" }}
                     >
-                      <p className="text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>📝 キャプション</p>
+                      <p className="text-xs font-bold mb-1" style={{ color: "var(--muted)" }}>{r_.caption}</p>
                       <p className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: "var(--text)" }}>
                         {result.caption}
                       </p>

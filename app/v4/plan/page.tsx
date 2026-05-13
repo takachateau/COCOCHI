@@ -4,11 +4,9 @@ import { useState, useEffect } from "react"
 import { Sparkles, Download, ChevronRight, ChevronLeft, CheckCircle, Clock, ImageIcon, Copy, Check, BookOpen, X } from "lucide-react"
 import type { Persona, ContentPlan, PlanPost, BenchmarkPost } from "@/types/v2"
 import type { Product } from "@/types"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
-const DAY_NAMES = ["月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"]
-const POST_TYPE_LABELS: Record<string, string> = {
-  tips: "Tips系", product: "商品訴求", mixed: "混合",
-}
 const POST_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   tips:    { bg: "#f0ede8",   text: "var(--muted)" },
   product: { bg: "#2d292611", text: "var(--text)" },
@@ -24,6 +22,10 @@ function getCurrentWeekStart(): string {
 }
 
 export default function PlanPage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const pl = t.plan
+
   const [personas, setPersonas]         = useState<Persona[]>([])
   const [products, setProducts]         = useState<Product[]>([])
   const [benchmarkPosts, setBenchmarkPosts] = useState<BenchmarkPost[]>([])
@@ -63,8 +65,8 @@ export default function PlanPage() {
   const allDone   = planReady && plan.posts.every(p => p.status === "image_done")
 
   async function handleCreatePlan() {
-    if (!personaId) { setError("ペルソナを選択してください"); return }
-    if (!weekStart) { setError("週を選択してください"); return }
+    if (!personaId) { setError(t.personas.selectAccountPlaceholder); return }
+    if (!weekStart) { setError(t.personas.selectAccountPlaceholder); return }
     setError("")
     setCreatingPlan(true)
     setPlan(null)
@@ -78,7 +80,7 @@ export default function PlanPage() {
       if (d.error) throw new Error(d.error)
       setPlan(d.plan!)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "プラン作成に失敗しました")
+      setError(e instanceof Error ? e.message : pl.errorCreatePlan)
     } finally {
       setCreatingPlan(false)
     }
@@ -98,7 +100,7 @@ export default function PlanPage() {
       if (d.error) throw new Error(d.error)
       setPlan(d.plan!)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "テキスト生成に失敗しました")
+      setError(e instanceof Error ? e.message : pl.errorGenerateText)
     } finally {
       setGeneratingText(false)
     }
@@ -202,7 +204,7 @@ export default function PlanPage() {
                 <div>
                   <p className="text-sm font-bold" style={{ color: "var(--text)" }}>{bp.folderPath}</p>
                   <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
-                    {bp.postType} · {bp.tone} · {slideIndex + 1}/{total}枚目
+                    {bp.postType} · {bp.tone} · {slideIndex + 1}/{total}{t.results.imageCount}
                   </p>
                 </div>
                 <button
@@ -278,10 +280,10 @@ export default function PlanPage() {
               <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
                 <div>
                   <p className="text-sm font-bold" style={{ color: "var(--text)" }}>
-                    {DAY_NAMES[ip.day - 1]} — {POST_TYPE_LABELS[ip.postType]}
+                    {pl.dayNames[ip.day - 1]} — {pl.postTypes[ip.postType as keyof typeof pl.postTypes] ?? ip.postType}
                   </p>
                   <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
-                    {ip.generatedText?.overallTitle} · {slideIndex + 1}/{total}枚目
+                    {ip.generatedText?.overallTitle} · {slideIndex + 1}/{t.results.imageCount}
                   </p>
                 </div>
                 <button
@@ -347,9 +349,9 @@ export default function PlanPage() {
       })()}
 
       <div>
-        <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>投稿プラン 生成</h1>
+        <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>{pl.pageTitle}</h1>
         <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-          ペルソナ・商品・週を選んで7日分の投稿を一括生成します
+          {pl.settingsTitle}
         </p>
       </div>
 
@@ -363,20 +365,20 @@ export default function PlanPage() {
             className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
             style={{ background: "var(--accent)" }}
           >1</span>
-          <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>ペルソナ・商品・週を選ぶ</h2>
+          <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>{pl.settingsTitle}</h2>
         </div>
 
         {/* ─── ペルソナ ─── */}
         <div>
           <label className="block text-xs font-bold mb-3" style={{ color: "var(--muted)" }}>
-            ペルソナ <span style={{ color: "var(--accent)" }}>*</span>
+            {t.nav.personas} <span style={{ color: "var(--accent)" }}>*</span>
           </label>
           {personas.length === 0 ? (
             <div
               className="rounded-xl p-4 text-sm text-center"
               style={{ background: "var(--accent-light)", color: "var(--accent)" }}
             >
-              ペルソナが登録されていません。「ペルソナ」ページから先に作成してください。
+              {t.personas.noPersonas}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -442,13 +444,12 @@ export default function PlanPage() {
         {/* ─── 商品（省略可） ─── */}
         <div>
           <label className="block text-xs font-bold mb-3" style={{ color: "var(--muted)" }}>
-            商品（省略可）
+            {t.nav.products}（{t.common.optional}）
           </label>
           {products.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--muted)" }}>商品が登録されていません</p>
+            <p className="text-sm" style={{ color: "var(--muted)" }}>{pl.noProducts}</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {/* 選択しないカード */}
               <button
                 type="button"
                 onClick={() => setProductId("")}
@@ -460,8 +461,8 @@ export default function PlanPage() {
                 }}
               >
                 <span className="text-2xl mb-1 leading-none" style={{ color: "var(--muted)" }}>—</span>
-                <p className="text-xs font-bold" style={{ color: "var(--text)" }}>選択しない</p>
-                <p className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>Tips系のみ</p>
+                <p className="text-xs font-bold" style={{ color: "var(--text)" }}>{pl.noProduct}</p>
+                <p className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>{pl.noProductHint}</p>
               </button>
               {products.map(prod => {
                 const selected = productId === prod.id
@@ -510,7 +511,7 @@ export default function PlanPage() {
         {/* ─── 週開始日 ─── */}
         <div>
           <label className="block text-xs font-bold mb-3" style={{ color: "var(--muted)" }}>
-            週開始日（月曜日）
+            {pl.dayNames[0]}
           </label>
           <input
             type="date"
@@ -530,9 +531,9 @@ export default function PlanPage() {
           style={{ background: "var(--accent)" }}
         >
           {creatingPlan ? (
-            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> プランを作成中...</>
+            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> {pl.creatingPlan}</>
           ) : (
-            <><Sparkles className="w-4 h-4" /> 週次プランを作成</>
+            <><Sparkles className="w-4 h-4" /> {pl.createPlan}</>
           )}
         </button>
       </div>
@@ -553,8 +554,8 @@ export default function PlanPage() {
                   {textReady ? <CheckCircle className="w-4 h-4" /> : "2"}
                 </span>
                 <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>
-                  テキストを生成する
-                  {textReady && <span className="ml-2 text-xs font-normal" style={{ color: "#22c55e" }}>完了</span>}
+                  {pl.generateTexts}
+                  {textReady && <span className="ml-2 text-xs font-normal" style={{ color: "#22c55e" }}>{pl.textsDone}</span>}
                 </h2>
               </div>
               {!textReady && (
@@ -565,9 +566,9 @@ export default function PlanPage() {
                   style={{ background: "var(--accent)" }}
                 >
                   {generatingText ? (
-                    <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 生成中（60〜120秒）...</>
+                    <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> {pl.generatingTexts}</>
                   ) : (
-                    <><Sparkles className="w-3.5 h-3.5" /> 7投稿分のテキストを一括生成</>
+                    <><Sparkles className="w-3.5 h-3.5" /> {pl.generateTexts}</>
                   )}
                 </button>
               )}
@@ -588,9 +589,9 @@ export default function PlanPage() {
                     style={{ border: "1px solid var(--border)", background: "var(--bg)" }}
                   >
                     <div className="px-2 py-1.5 text-center" style={{ background: colors.bg }}>
-                      <p className="text-xs font-bold" style={{ color: colors.text }}>{DAY_NAMES[post.day - 1]}</p>
+                      <p className="text-xs font-bold" style={{ color: colors.text }}>{pl.dayNames[post.day - 1]}</p>
                       <p className="text-[10px] mt-0.5" style={{ color: colors.text, opacity: 0.8 }}>
-                        {POST_TYPE_LABELS[post.postType]}
+                        {pl.postTypes[post.postType as keyof typeof pl.postTypes] ?? post.postType}
                       </p>
                     </div>
                     <div className="p-2 flex-1 flex flex-col gap-2">
@@ -603,7 +604,7 @@ export default function PlanPage() {
                           <Clock className="w-3 h-3" style={{ color: "var(--border)" }} />
                         )}
                         <span className="text-[10px]" style={{ color: "var(--muted)" }}>
-                          {hasImages ? "完了" : hasText ? "テキスト済み" : "未生成"}
+                          {hasImages ? pl.textsDone : hasText ? pl.textsReady : pl.notGenerated}
                         </span>
                       </div>
                       {post.generatedText && (
@@ -632,9 +633,9 @@ export default function PlanPage() {
                           style={{ background: "var(--accent-light)", color: "var(--accent)" }}
                         >
                           {isGenerating ? (
-                            <><div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" /> 生成中...</>
+                            <><div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" /> {t.common.generating}</>
                           ) : (
-                            <><ImageIcon className="w-3 h-3" /> 画像を生成</>
+                            <><ImageIcon className="w-3 h-3" /> {pl.generateImage}</>
                           )}
                         </button>
                       )}
@@ -658,7 +659,7 @@ export default function PlanPage() {
                 >
                   3
                 </span>
-                <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>画像生成・ダウンロード</h2>
+                <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>{pl.imageSection}</h2>
               </div>
 
               <div className="space-y-3">
@@ -681,10 +682,10 @@ export default function PlanPage() {
                                 color: POST_TYPE_COLORS[post.postType]?.text,
                               }}
                             >
-                              {POST_TYPE_LABELS[post.postType]}
+                              {pl.postTypes[post.postType as keyof typeof pl.postTypes] ?? post.postType}
                             </span>
                             <span className="text-xs font-bold" style={{ color: "var(--muted)" }}>
-                              {DAY_NAMES[post.day - 1]}
+                              {pl.dayNames[post.day - 1]}
                             </span>
                           </div>
                           {post.generatedText && (
@@ -704,8 +705,8 @@ export default function PlanPage() {
                               }}
                             >
                               {copiedDay === post.day
-                                ? <><Check className="w-3 h-3" /> コピー済み</>
-                                : <><Copy className="w-3 h-3" /> キャプション</>}
+                                ? <><Check className="w-3 h-3" /> {t.common.copied}</>
+                                : <><Copy className="w-3 h-3" /> {pl.caption}</>}
                             </button>
                           )}
                           {hasImages && (
@@ -726,9 +727,9 @@ export default function PlanPage() {
                               style={{ background: "var(--accent)", color: "white" }}
                             >
                               {isGenerating ? (
-                                <><div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> 生成中（60〜120秒）...</>
+                                <><div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> {pl.generatingImage}</>
                               ) : (
-                                <><ImageIcon className="w-3 h-3" /> 画像を生成</>
+                                <><ImageIcon className="w-3 h-3" /> {pl.generateImage}</>
                               )}
                             </button>
                           )}
@@ -766,7 +767,7 @@ export default function PlanPage() {
                                     ) : (
                                       <ImageIcon className="w-2.5 h-2.5" />
                                     )}
-                                    {isGenThisSlide ? "生成中" : "1枚生成"}
+                                    {isGenThisSlide ? t.common.generatingSlide : pl.generateSlide}
                                   </button>
                                   {resultUrl && (
                                     <button onClick={() => setImagePreview({ post: { ...post, generatedImages: [resultUrl] }, slideIndex: 0 })}>
@@ -793,7 +794,7 @@ export default function PlanPage() {
                             <div className="flex items-center gap-1">
                               <BookOpen className="w-3 h-3 flex-shrink-0" style={{ color: "var(--accent)" }} />
                               <span className="text-[10px] font-bold" style={{ color: "var(--accent)" }}>
-                                参照: {ref.folderPath}
+                                {t.personas.refPrefix}{ref.folderPath}
                               </span>
                             </div>
                             <div className="flex gap-1 flex-wrap">
@@ -852,7 +853,7 @@ export default function PlanPage() {
                   style={{ background: "var(--accent)" }}
                 >
                   <Download className="w-4 h-4" />
-                  全投稿の画像を一括ダウンロード（{plan.posts.reduce((s, p) => s + (p.generatedImages?.length ?? 0), 0)}枚）
+                  {pl.imageSection}（{plan.posts.reduce((s, p) => s + (p.generatedImages?.length ?? 0), 0)}{t.results.imageCount}）
                 </button>
               )}
             </div>

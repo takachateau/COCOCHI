@@ -8,8 +8,8 @@ import {
   ChevronDown, ChevronUp,
 } from "lucide-react"
 import type { Persona, BenchmarkPost, RichPersonaProfile, PostType } from "@/types/v2"
-
-const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
 // ─── ユーティリティ ──────────────────────────────────────────────
 
@@ -366,6 +366,8 @@ function PersonaCard({
   onDelete: (id: string) => void
 }) {
   const router = useRouter()
+  const { lang } = useLanguage()
+  const t = useT(lang)
   const p = persona.profile
   const colorIndex = persona.name.charCodeAt(0) % AVATAR_COLORS.length
   const avatarBg = AVATAR_COLORS[colorIndex]
@@ -378,7 +380,6 @@ function PersonaCard({
       onClick={() => router.push(`/v4/personas/${persona.id}`)}
     >
       <div className="p-5 flex items-start gap-4">
-        {/* アバター */}
         {persona.avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={persona.avatarUrl} alt={persona.name}
@@ -390,7 +391,6 @@ function PersonaCard({
           </div>
         )}
 
-        {/* テキスト情報 */}
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
@@ -402,7 +402,7 @@ function PersonaCard({
               )}
               {p && (
                 <div className="flex flex-wrap items-center gap-x-2 mt-1 text-xs" style={{ color: "var(--muted)", opacity: 0.7 }}>
-                  {p.age && <span>{p.age}歳</span>}
+                  {p.age && <span>{p.age}{t.personas.ageSuffix}</span>}
                   {p.location && <span className="flex items-center gap-0.5"><MapPin className="w-2.5 h-2.5" />{p.location}</span>}
                 </div>
               )}
@@ -415,17 +415,15 @@ function PersonaCard({
             </button>
           </div>
 
-          {/* narrativeHook — フォローする決め手 */}
           {p?.narrativeHook && (
             <p className="mt-2 text-xs leading-relaxed line-clamp-2" style={{ color: "var(--text)" }}>
               {p.narrativeHook}
             </p>
           )}
 
-          {/* 参照ベンチマーク */}
           {persona.benchmarkAccount && (
             <p className="text-[10px] mt-1.5 opacity-40" style={{ color: "var(--muted)" }}>
-              参照: {persona.benchmarkAccount}
+              {t.personas.refPrefix}{persona.benchmarkAccount}
             </p>
           )}
         </div>
@@ -437,6 +435,9 @@ function PersonaCard({
 // ─── メインページ ───────────────────────────────────────────────
 
 export default function PersonasPage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const DAY_LABELS = t.personas.dayLabels
   const [personas, setPersonas]             = useState<Persona[]>([])
   const [benchmarkPosts, setBenchmarkPosts] = useState<BenchmarkPost[]>([])
   const [loading, setLoading]               = useState(true)
@@ -460,7 +461,7 @@ export default function PersonasPage() {
 
   async function handleGenerate(e: React.FormEvent) {
     e.preventDefault()
-    if (!accountName) { setError("アカウントを選択してください"); return }
+    if (!accountName) { setError(t.personas.errorSelectAccount); return }
     setError(""); setGenerating(true)
     try {
       const r = await fetch("/api/personas/generate", {
@@ -473,12 +474,12 @@ export default function PersonasPage() {
       setPersonas(prev => [d.persona!, ...prev])
       setAccountName(""); setShowForm(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "生成に失敗しました")
+      setError(e instanceof Error ? e.message : t.personas.generateFailed)
     } finally { setGenerating(false) }
   }
 
   function handleDelete(id: string) {
-    if (!confirm("このペルソナを削除しますか？")) return
+    if (!confirm(t.personas.confirmDeletePersona)) return
     fetch(`/api/personas?id=${id}`, { method: "DELETE" })
     setPersonas(prev => prev.filter(p => p.id !== id))
   }
@@ -487,44 +488,43 @@ export default function PersonasPage() {
     setPersonas(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p))
   }
 
+  const ps = t.personas
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>ペルソナ 管理</h1>
-          <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-            ベンチマーク分析から架空のアカウント人格を生成して保存します
-          </p>
+          <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>{ps.pageTitle}</h1>
+          <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>{ps.pageDesc}</p>
         </div>
         <button onClick={() => setShowForm(v => !v)}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-85"
           style={{ background: "var(--accent)" }}>
           {showForm ? <X className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-          {showForm ? "キャンセル" : "ペルソナを生成"}
+          {showForm ? t.common.cancel : ps.generateBtn}
         </button>
       </div>
 
-      {/* 生成フォーム */}
       {showForm && (
         <form onSubmit={handleGenerate} className="rounded-2xl p-6 space-y-5"
           style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>ベンチマークからペルソナを生成</h2>
+          <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>{ps.generateFormTitle}</h2>
           {accounts.length === 0 ? (
             <div className="rounded-xl p-4 text-sm text-center" style={{ background: "var(--accent-light)", color: "var(--accent)" }}>
-              ベンチマーク投稿が登録されていません。先に「ベンチマーク」ページから投稿を登録してください。
+              {ps.noBenchmarkPosts}
             </div>
           ) : (
             <>
               <div>
                 <label className="block text-xs font-bold mb-2" style={{ color: "var(--muted)" }}>
-                  参照アカウントを選択 <span style={{ color: "var(--accent)" }}>*</span>
+                  {ps.selectAccount} <span style={{ color: "var(--accent)" }}>*</span>
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {accounts.map(a => {
                     const acctPosts = benchmarkPosts.filter(p => p.accountName === a)
                     const thumbs = acctPosts.slice(0, 4).map(p => p.slideUrls[0]).filter(Boolean)
-                    const tagCounts = acctPosts.flatMap(p => p.themeTags).reduce((acc, t) => { acc[t] = (acc[t] ?? 0) + 1; return acc }, {} as Record<string, number>)
-                    const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t)
+                    const tagCounts = acctPosts.flatMap(p => p.themeTags).reduce((acc, tag) => { acc[tag] = (acc[tag] ?? 0) + 1; return acc }, {} as Record<string, number>)
+                    const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([tag]) => tag)
                     const selected = accountName === a
                     return (
                       <button
@@ -538,7 +538,6 @@ export default function PersonasPage() {
                           boxShadow: selected ? "0 0 0 3px var(--accent-light)" : "none",
                         }}
                       >
-                        {/* サムネイルグリッド */}
                         <div className="grid grid-cols-4 gap-0" style={{ background: "var(--border)" }}>
                           {Array.from({ length: 4 }).map((_, i) =>
                             thumbs[i] ? (
@@ -549,7 +548,6 @@ export default function PersonasPage() {
                             )
                           )}
                         </div>
-                        {/* 情報 */}
                         <div className="p-2.5 space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <p className="text-xs font-bold truncate" style={{ color: "var(--text)" }}>{a}</p>
@@ -562,11 +560,11 @@ export default function PersonasPage() {
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px]" style={{ color: "var(--muted)" }}>{acctPosts.length}投稿</p>
+                          <p className="text-[10px]" style={{ color: "var(--muted)" }}>{acctPosts.length}{ps.postsSuffix}</p>
                           <div className="flex flex-wrap gap-1">
-                            {topTags.map(t => (
-                              <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-full"
-                                style={{ background: "var(--card)", color: "var(--muted)" }}>#{t}</span>
+                            {topTags.map(tag => (
+                              <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded-full"
+                                style={{ background: "var(--card)", color: "var(--muted)" }}>#{tag}</span>
                             ))}
                           </div>
                         </div>
@@ -574,24 +572,21 @@ export default function PersonasPage() {
                     )
                   })}
                 </div>
-                <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
-                  ペルソナ名はClaudeが自動で生成します
-                </p>
+                <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>{ps.nameAutoGenerated}</p>
               </div>
               {error && <p className="text-sm" style={{ color: "#e53e3e" }}>{error}</p>}
               <button type="submit" disabled={generating || !accountName}
                 className="px-6 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-85 disabled:opacity-50 flex items-center gap-2"
                 style={{ background: "var(--accent)" }}>
                 {generating
-                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 生成中（30秒ほど）...</>
-                  : <><Sparkles className="w-4 h-4" /> {accountName ? `「${accountName}」からペルソナを生成` : "アカウントを選択してください"}</>}
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> {ps.generating30s}</>
+                  : <><Sparkles className="w-4 h-4" /> {accountName ? `「${accountName}」${ps.generateFromAccount}` : ps.selectAccountPlaceholder}</>}
               </button>
             </>
           )}
         </form>
       )}
 
-      {/* ペルソナ一覧 */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="w-7 h-7 rounded-full animate-spin" style={{ border: "3px solid var(--accent)", borderTopColor: "transparent" }} />
@@ -599,8 +594,8 @@ export default function PersonasPage() {
       ) : personas.length === 0 ? (
         <div className="text-center py-20" style={{ color: "var(--muted)" }}>
           <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">まだペルソナがありません</p>
-          <p className="text-xs mt-1">「ペルソナを生成」からベンチマーク分析をもとに作成できます</p>
+          <p className="text-sm">{ps.noPersonas}</p>
+          <p className="text-xs mt-1">{ps.noPersonasHint}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

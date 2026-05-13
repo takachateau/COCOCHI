@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import { Plus, Trash2, Upload, X, ChevronRight } from "lucide-react"
 import type { CompetitorProduct } from "@/types/v2"
 import type { Product } from "@/types"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
 const EMPTY_FORM = {
   brandName: "", productName: "", price: "",
@@ -11,6 +13,9 @@ const EMPTY_FORM = {
 }
 
 export default function CompetitorsPage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const c = t.competitors
   const [ownProducts, setOwnProducts]     = useState<Product[]>([])
   const [competitors, setCompetitors]     = useState<CompetitorProduct[]>([])
   const [loading, setLoading]             = useState(true)
@@ -49,9 +54,9 @@ export default function CompetitorsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!selectedProduct) return
-    if (!imageFile) { setError("商品画像を選択してください"); return }
+    if (!imageFile) { setError(c.errorImage); return }
     if (!form.brandName || !form.productName || !form.features || !form.pros || !form.cons) {
-      setError("必須項目をすべて入力してください"); return
+      setError(c.errorRequired); return
     }
     setError("")
     setSaving(true)
@@ -79,14 +84,14 @@ export default function CompetitorsPage() {
       setImagePreview("")
       setShowForm(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "登録に失敗しました")
+      setError(e instanceof Error ? e.message : c.registerFailed)
     } finally {
       setSaving(false)
     }
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("削除しますか？")) return
+    if (!confirm(t.common.confirmDelete)) return
     await fetch(`/api/competitors?id=${id}`, { method: "DELETE" })
     setCompetitors(prev => prev.filter(p => p.id !== id))
   }
@@ -100,10 +105,8 @@ export default function CompetitorsPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>競合商品 管理</h1>
-          <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-            自社商品を選んで、比較レビュー用の競合商品を登録します
-          </p>
+          <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>{c.pageTitle}</h1>
+          <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>{c.pageDesc}</p>
         </div>
 
         {loading ? (
@@ -112,8 +115,8 @@ export default function CompetitorsPage() {
           </div>
         ) : ownProducts.length === 0 ? (
           <div className="text-center py-20" style={{ color: "var(--muted)" }}>
-            <p className="text-sm">自社商品が登録されていません</p>
-            <p className="text-xs mt-1">先に「商品管理」から商品を登録してください</p>
+            <p className="text-sm">{c.noOwnProducts}</p>
+            <p className="text-xs mt-1">{c.noOwnProductsHint}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -136,7 +139,7 @@ export default function CompetitorsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-sm" style={{ color: "var(--text)" }}>{p.name}</p>
                     <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-                      競合商品 {count}件登録済み
+                      {c.registeredCount} {count}{c.countSuffix}
                     </p>
                   </div>
                   <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--muted)" }} />
@@ -160,7 +163,7 @@ export default function CompetitorsPage() {
             className="text-sm transition-opacity hover:opacity-70"
             style={{ color: "var(--muted)" }}
           >
-            ← 戻る
+            {t.common.back}
           </button>
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -172,7 +175,7 @@ export default function CompetitorsPage() {
             />
             <div>
               <h1 className="text-lg font-bold" style={{ color: "var(--text)" }}>{selectedProduct.name}</h1>
-              <p className="text-xs" style={{ color: "var(--muted)" }}>競合商品 {currentCompetitors.length}件</p>
+              <p className="text-xs" style={{ color: "var(--muted)" }}>{c.countLabel} {currentCompetitors.length}{t.common.count}</p>
             </div>
           </div>
         </div>
@@ -182,7 +185,7 @@ export default function CompetitorsPage() {
           style={{ background: "var(--accent)" }}
         >
           {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showForm ? "キャンセル" : "競合商品を追加"}
+          {showForm ? t.common.cancel : c.addBtn}
         </button>
       </div>
 
@@ -194,15 +197,15 @@ export default function CompetitorsPage() {
           style={{ background: "var(--card)", border: "1px solid var(--border)" }}
         >
           <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>
-            「{selectedProduct.name}」の競合商品を追加
+            「{selectedProduct.name}」{c.formTitle}
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {([
-              ["brandName",   "競合ブランド名", "例: COSRX",            true],
-              ["productName", "競合商品名",     "例: スネイルエッセンス", true],
-              ["price",       "価格",           "例: ¥2,000",            false],
-              ["category",    "カテゴリ",       "例: 化粧水",             false],
+              ["brandName",   c.brandName,   "例: COSRX",            true],
+              ["productName", c.productName, "例: スネイルエッセンス", true],
+              ["price",       c.price,       "例: ¥2,000",            false],
+              ["category",    c.category,    "例: 化粧水",             false],
             ] as [keyof typeof form, string, string, boolean][]).map(([key, label, ph, req]) => (
               <div key={key}>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--muted)" }}>
@@ -221,10 +224,10 @@ export default function CompetitorsPage() {
           </div>
 
           {([
-            ["features", "主な成分・特徴",      "例: ヒアルロン酸・セラミド配合",  true],
-            ["pros",     "メリット",             "例: 保湿力が高くべたつかない",     true],
-            ["cons",     "デメリット",           "例: 香料が強め、テクスチャが重い",  true],
-            ["tags",     "タグ（カンマ区切り）", "例: 保湿, 毛穴, プチプラ",         false],
+            ["features", c.features, "例: ヒアルロン酸・セラミド配合",  true],
+            ["pros",     c.pros,     "例: 保湿力が高くべたつかない",     true],
+            ["cons",     c.cons,     "例: 香料が強め、テクスチャが重い",  true],
+            ["tags",     c.tags,     "例: 保湿, 毛穴, プチプラ",         false],
           ] as [keyof typeof form, string, string, boolean][]).map(([key, label, ph, req]) => (
             <div key={key}>
               <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--muted)" }}>
@@ -243,7 +246,7 @@ export default function CompetitorsPage() {
 
           <div>
             <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--muted)" }}>
-              競合商品画像 <span style={{ color: "var(--accent)" }}>*</span>
+              {c.imageLabel} <span style={{ color: "var(--accent)" }}>*</span>
             </label>
             {imagePreview ? (
               <div className="relative inline-block">
@@ -278,7 +281,7 @@ export default function CompetitorsPage() {
                   onChange={e => { const f = e.target.files?.[0]; if (f) setImage(f); e.target.value = "" }}
                 />
                 <Upload className="w-6 h-6 mx-auto mb-1" style={{ color: "var(--muted)" }} />
-                <p className="text-xs" style={{ color: "var(--muted)" }}>クリックまたはドロップで画像を選択</p>
+                <p className="text-xs" style={{ color: "var(--muted)" }}>{c.imageDrop}</p>
               </div>
             )}
           </div>
@@ -292,8 +295,8 @@ export default function CompetitorsPage() {
             style={{ background: "var(--accent)" }}
           >
             {saving ? (
-              <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 登録中...</>
-            ) : "登録する"}
+              <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> {t.common.registering}</>
+            ) : t.common.register}
           </button>
         </form>
       )}
@@ -304,8 +307,8 @@ export default function CompetitorsPage() {
           className="rounded-2xl p-10 text-center"
           style={{ background: "var(--card)", border: "1px dashed var(--border)" }}
         >
-          <p className="text-sm" style={{ color: "var(--muted)" }}>まだ競合商品がありません</p>
-          <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>「競合商品を追加」から登録してください</p>
+          <p className="text-sm" style={{ color: "var(--muted)" }}>{c.noCompetitors}</p>
+          <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>{c.noCompetitorsHint}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -336,9 +339,9 @@ export default function CompetitorsPage() {
               </div>
 
               <div className="px-4 pb-3 space-y-1.5 text-xs" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-                <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>特徴: </span>{p.features}</p>
-                <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>◎ </span>{p.pros}</p>
-                <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>△ </span>{p.cons}</p>
+                <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>{c.featureLabel}</span>{p.features}</p>
+                <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>{c.prosLabel}</span>{p.pros}</p>
+                <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>{c.consLabel}</span>{p.cons}</p>
               </div>
 
               <div className="px-4 pb-4">
@@ -347,7 +350,7 @@ export default function CompetitorsPage() {
                   className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70"
                   style={{ color: "var(--muted)" }}
                 >
-                  <Trash2 className="w-3 h-3" /> 削除
+                  <Trash2 className="w-3 h-3" /> {t.common.delete}
                 </button>
               </div>
             </div>

@@ -12,6 +12,8 @@ import type {
   CompositionType,
 } from "@/types/v2"
 import type { Product } from "@/types"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
 interface Types {
   hookType: HookType
@@ -19,50 +21,31 @@ interface Types {
   compositionType: CompositionType
 }
 
-const POST_TYPE_LABELS: Record<PostType, string> = {
-  tips:    "Tips",
-  product: "商品紹介 (product)",
-  mixed:   "混合 (mixed)",
-}
-
-const HOOK_LABELS: Record<HookType, string> = {
-  F1: "F1 自己同一化",
-  F2: "F2 数字n選",
-  F3: "F3 逆張り",
-  F4: "F4 危機煽り",
-  F5: "F5 即効ベネ",
-}
-const STRUCTURE_LABELS: Record<StructureType, string> = {
-  S1: "S1 フル装備",
-  S2: "S2 最短",
-  S3: "S3 共感型",
-  S4: "S4 カタログ",
-  S5: "S5 証拠先導",
-}
-const COMPOSITION_LABELS: Record<CompositionType, string> = {
-  C1: "C1 テキスト主体",
-  C2: "C2 写真メイン",
-  C3: "C3 表リスト",
-  C4: "C4 B/A比較",
-  C5: "C5 ムード重視",
-}
-
 type Phase = "idle" | "text" | "image" | "done"
 
+const POST_TYPE_KEYS: PostType[] = ["tips", "product", "mixed"]
+
 export default function TestGeneratePage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const g = t.generate
+  const POST_TYPE_LABELS: Record<PostType, string> = g.postTypes
+  const HOOK_LABELS: Record<HookType, string>           = g.hook
+  const STRUCTURE_LABELS: Record<StructureType, string> = g.structure
+  const COMPOSITION_LABELS: Record<CompositionType, string> = g.composition
   const [personas, setPersonas]   = useState<Persona[]>([])
   const [products, setProducts]   = useState<Product[]>([])
   const [personaId, setPersonaId] = useState("")
   const [postType, setPostType]   = useState<PostType>("tips")
 
   const selectedPersona = personas.find(p => p.id === personaId) ?? null
-  const availablePostTypes = (Object.keys(POST_TYPE_LABELS) as PostType[]).filter(t => {
+  const availablePostTypes = POST_TYPE_KEYS.filter(pt => {
+    const t_ = pt
     if (!selectedPersona) return true
     const r = selectedPersona.typeRatios
-    if (t === "tips")    return (r.tips    ?? 0) > 0
-    if (t === "product") return (r.product ?? 0) > 0
-    // mixed: ベンチマークにmixedがなくてもTipsがあれば生成可能（Tips構造に商品を乗せる）
-    if (t === "mixed")   return (r.mixed ?? 0) > 0 || (r.tips ?? 0) > 0
+    if (t_ === "tips")    return (r.tips    ?? 0) > 0
+    if (t_ === "product") return (r.product ?? 0) > 0
+    if (t_ === "mixed")   return (r.mixed ?? 0) > 0 || (r.tips ?? 0) > 0
     return false
   })
   const [productId, setProductId] = useState("")

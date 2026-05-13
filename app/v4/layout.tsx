@@ -5,16 +5,18 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Sparkles, ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader } from "lucide-react"
 import type { GenerationJob } from "@/types/v2"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
-const NAV = [
-  { href: "/v4/benchmark",     label: "ベンチマーク" },
-  { href: "/v4/competitors",   label: "競合商品" },
-  { href: "/v4/products",      label: "商品管理" },
-  { href: "/v4/personas",      label: "ペルソナ" },
-  { href: "/v4/test-generate", label: "生成テスト" },
-  { href: "/v4/results",       label: "生成結果" },
-  { href: "/v4/plan",          label: "投稿プラン" },
-]
+const NAV_HREFS = [
+  { href: "/v4/benchmark",     key: "benchmark"    },
+  { href: "/v4/competitors",   key: "competitors"  },
+  { href: "/v4/products",      key: "products"     },
+  { href: "/v4/personas",      key: "personas"     },
+  { href: "/v4/test-generate", key: "testGenerate" },
+  { href: "/v4/results",       key: "results"      },
+  { href: "/v4/plan",          key: "plan"         },
+] as const
 
 const VERSIONS = [
   { label: "V1", href: "/" },
@@ -24,25 +26,37 @@ const VERSIONS = [
 ]
 const CURRENT = "V4"
 
-const STATUS_CONFIG = {
-  pending:          { label: "待機中",       icon: Clock,     color: "#6b7280" },
-  text_generating:  { label: "テキスト生成中", icon: Loader,    color: "#0891b2" },
-  image_generating: { label: "画像生成中",    icon: Loader,    color: "#7c3aed" },
-  done:             { label: "完了",          icon: CheckCircle, color: "#16a34a" },
-  error:            { label: "エラー",        icon: AlertCircle, color: "#ef4444" },
-}
-
-function formatElapsed(createdAt: string): string {
-  const diff = (Date.now() - new Date(createdAt).getTime()) / 1000
-  if (diff < 60)   return `${Math.floor(diff)}秒前`
-  if (diff < 3600) return `${Math.floor(diff / 60)}分前`
-  return `${Math.floor(diff / 3600)}時間前`
+const STATUS_ICONS = {
+  pending:          { icon: Clock,        color: "#6b7280" },
+  text_generating:  { icon: Loader,       color: "#0891b2" },
+  image_generating: { icon: Loader,       color: "#7c3aed" },
+  done:             { icon: CheckCircle, color: "#16a34a" },
+  error:            { icon: AlertCircle, color: "#ef4444" },
 }
 
 // ─── キューパネル ─────────────────────────────────────────────────
 function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob: (job: GenerationJob) => void }) {
+  const { lang } = useLanguage()
+  const t = useT(lang)
   const [jobs, setJobs] = useState<GenerationJob[]>([])
   const [loading, setLoading] = useState(true)
+
+  function formatElapsed(createdAt: string): string {
+    const diff = (Date.now() - new Date(createdAt).getTime()) / 1000
+    if (diff < 60)   return `${Math.floor(diff)}${t.queue.secAgo}`
+    if (diff < 3600) return `${Math.floor(diff / 60)}${t.queue.minAgo}`
+    return `${Math.floor(diff / 3600)}${t.queue.hrAgo}`
+  }
+
+  function getStatusLabel(status: keyof typeof STATUS_ICONS): string {
+    switch (status) {
+      case "pending":          return t.queue.statusPending
+      case "text_generating":  return t.queue.statusTextGen
+      case "image_generating": return t.queue.statusImageGen
+      case "done":             return t.queue.statusDone
+      case "error":            return t.queue.statusError
+    }
+  }
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -75,15 +89,15 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
         <div className="flex items-center gap-2">
           <ListOrdered className="w-4 h-4" style={{ color: "var(--accent)" }} />
-          <span className="font-bold text-sm" style={{ color: "var(--text)" }}>生成キュー</span>
+          <span className="font-bold text-sm" style={{ color: "var(--text)" }}>{t.queue.title}</span>
           {activeCount > 0 && (
             <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white" style={{ background: "var(--accent)" }}>
-              {activeCount}件処理中
+              {activeCount}{t.queue.processing}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={fetchJobs} className="p-1 rounded hover:opacity-70" title="更新">
+          <button onClick={fetchJobs} className="p-1 rounded hover:opacity-70" title={t.queue.refresh}>
             <RefreshCw className="w-3.5 h-3.5" style={{ color: "var(--muted)" }} />
           </button>
           <button onClick={onClose} className="p-1 rounded hover:opacity-70">
@@ -100,13 +114,14 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
           </div>
         ) : jobs.length === 0 ? (
           <div className="py-10 text-center text-sm" style={{ color: "var(--muted)" }}>
-            キューにジョブがありません
+            {t.queue.empty}
           </div>
         ) : (
           <div className="divide-y" style={{ borderColor: "var(--border)" }}>
             {jobs.map(job => {
-              const cfg = STATUS_CONFIG[job.status]
+              const cfg = STATUS_ICONS[job.status]
               const Icon = cfg.icon
+              const label = getStatusLabel(job.status)
               const isActive = job.status === "text_generating" || job.status === "image_generating"
               const isDone = job.status === "done"
               return (
@@ -136,7 +151,7 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                         className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                         style={{ background: `${cfg.color}22`, color: cfg.color }}
                       >
-                        {cfg.label}
+                        {label}
                       </span>
                       <span className="text-[10px]" style={{ color: "var(--muted)" }}>
                         {formatElapsed(job.createdAt)}
@@ -157,7 +172,7 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                     )}
                     {isDone && (
                       <p className="text-[10px] mt-0.5" style={{ color: "#16a34a" }}>
-                        クリックで結果を表示 →
+                        {t.queue.clickToView}
                       </p>
                     )}
                   </div>
@@ -179,6 +194,8 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
 
 // ─── 結果モーダル（キューから開く） ──────────────────────────────
 function JobResultModal({ job, onClose }: { job: GenerationJob; onClose: () => void }) {
+  const { lang } = useLanguage()
+  const t = useT(lang)
   const [modalImgIdx, setModalImgIdx] = useState<number | null>(null)
 
   useEffect(() => {
@@ -256,7 +273,7 @@ function JobResultModal({ job, onClose }: { job: GenerationJob; onClose: () => v
                     {job.failedSlides?.includes(slide.slideNumber) ? (
                       <span style={{ fontSize: 18 }}>⚠️</span>
                     ) : (
-                      <span className="text-xs" style={{ color: "var(--muted)" }}>なし</span>
+                      <span className="text-xs" style={{ color: "var(--muted)" }}>{t.common.noImage}</span>
                     )}
                   </div>
                 )}
@@ -270,7 +287,7 @@ function JobResultModal({ job, onClose }: { job: GenerationJob; onClose: () => v
                   <span className="text-[10px] font-bold" style={{ color: "var(--accent)" }}>{slide.tag}</span>
                   {job.policyFallbackSlides?.includes(slide.slideNumber) && (
                     <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: "#fff7ed", color: "#c2410c", border: "1px solid #fb923c" }}>
-                      ⚠️ シンプル版
+                      {t.queue.simpleFallback}
                     </span>
                   )}
                 </div>
@@ -310,10 +327,14 @@ function JobResultModal({ job, onClose }: { job: GenerationJob; onClose: () => v
 // ─── メインレイアウト ─────────────────────────────────────────────
 export default function V4Layout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const { lang, toggle } = useLanguage()
+  const t = useT(lang)
   const [queueOpen, setQueueOpen] = useState(false)
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null)
   const [activeCount, setActiveCount] = useState(0)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const NAV = NAV_HREFS.map(n => ({ href: n.href, label: t.nav[n.key] }))
 
   // バッジ用: 処理中ジョブ数をポーリング
   useEffect(() => {
@@ -366,11 +387,28 @@ export default function V4Layout({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
+          {/* 言語切り替えボタン */}
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex-shrink-0"
+            style={{
+              background: "var(--bg)",
+              color: "var(--text)",
+              border: "1.5px solid var(--border)",
+            }}
+            title={lang === "ja" ? "中文に切り替え" : "日本語に切り替え"}
+          >
+            <span style={{ opacity: lang === "ja" ? 1 : 0.4 }}>JA</span>
+            <span style={{ color: "var(--border)" }}>|</span>
+            <span style={{ opacity: lang === "zh" ? 1 : 0.4 }}>中</span>
+          </button>
+
           {/* 生成キューボタン */}
           <button
             type="button"
             onClick={() => setQueueOpen(v => !v)}
-            className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+            className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex-shrink-0"
             style={{
               background: queueOpen ? "var(--accent-light)" : "var(--bg)",
               color: queueOpen ? "var(--accent)" : "var(--text)",
@@ -378,7 +416,7 @@ export default function V4Layout({ children }: { children: React.ReactNode }) {
             }}
           >
             <ListOrdered className="w-4 h-4" />
-            <span>生成キュー</span>
+            <span>{t.queue.title}</span>
             {activeCount > 0 && (
               <span
                 className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center"

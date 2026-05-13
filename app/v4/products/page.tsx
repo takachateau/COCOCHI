@@ -4,6 +4,8 @@ import { useState, useRef } from "react"
 import { useProducts } from "@/context/products"
 import { Upload, Plus, Trash2, Package, Check, Pencil, X, FileText, Loader2 } from "lucide-react"
 import type { Product } from "@/types"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
 function Field({
   label, value, onChange, placeholder, rows, required, hint,
@@ -46,6 +48,9 @@ function Field({
 }
 
 function PdfUploader({ pdfText, onExtracted }: { pdfText: string; onExtracted: (text: string) => void }) {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const p = t.products
   const pdfRef = useRef<HTMLInputElement>(null)
   const [extracting, setExtracting] = useState(false)
   const [pdfName, setPdfName] = useState("")
@@ -71,7 +76,7 @@ function PdfUploader({ pdfText, onExtracted }: { pdfText: string; onExtracted: (
       if (data.error) throw new Error(data.error)
       onExtracted(data.text as string)
     } catch (err) {
-      alert(err instanceof Error ? err.message : "PDF読み込みに失敗しました")
+      alert(err instanceof Error ? err.message : p.pdfReadFailed)
     } finally {
       setExtracting(false)
       if (pdfRef.current) pdfRef.current.value = ""
@@ -81,10 +86,10 @@ function PdfUploader({ pdfText, onExtracted }: { pdfText: string; onExtracted: (
   return (
     <div>
       <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
-        PDF添付
-        <span className="font-normal ml-1" style={{ color: "var(--muted)" }}>（任意）</span>
+        {p.pdfLabel}
+        <span className="font-normal ml-1" style={{ color: "var(--muted)" }}>{p.pdfOptional}</span>
       </label>
-      <p className="text-xs mb-1.5" style={{ color: "var(--muted)" }}>成分表・規格書などのPDFをアップロードすると、内容が自動抽出されて投稿生成に活用されます</p>
+      <p className="text-xs mb-1.5" style={{ color: "var(--muted)" }}>{p.pdfHint}</p>
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -93,18 +98,18 @@ function PdfUploader({ pdfText, onExtracted }: { pdfText: string; onExtracted: (
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
           style={{ borderColor: "var(--border)", background: "var(--bg)", color: "var(--text)" }}
         >
-          {extracting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />抽出中...</> : <><FileText className="w-3.5 h-3.5" />PDFを選択</>}
+          {extracting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{p.pdfExtracting}</> : <><FileText className="w-3.5 h-3.5" />{p.pdfSelect}</>}
         </button>
         {pdfText && !extracting && (
-          <span className="text-xs" style={{ color: "var(--accent)" }}>✓ 抽出済み{pdfName && ` (${pdfName})`}</span>
+          <span className="text-xs" style={{ color: "var(--accent)" }}>{p.pdfExtracted}{pdfName && ` (${pdfName})`}</span>
         )}
       </div>
       <input ref={pdfRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfSelect} />
       {pdfText && (
         <div className="mt-2">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-bold" style={{ color: "var(--muted)" }}>抽出内容プレビュー</p>
-            <button onClick={() => onExtracted("")} className="text-xs" style={{ color: "var(--muted)" }}>クリア</button>
+            <p className="text-xs font-bold" style={{ color: "var(--muted)" }}>{p.pdfPreview}</p>
+            <button onClick={() => onExtracted("")} className="text-xs" style={{ color: "var(--muted)" }}>{t.common.clearPreview}</button>
           </div>
           <div className="px-3 py-2 rounded-lg text-xs overflow-auto max-h-32" style={{ background: "var(--accent-light)", border: "1px solid var(--border)", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
             {pdfText}
@@ -164,6 +169,9 @@ function ProductCard({ product, onEdit, onDelete }: { product: Product; onEdit: 
 }
 
 function EditModal({ product, onClose, onSaved }: { product: Product; onClose: () => void; onSaved: (p: Product) => void }) {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const p = t.products
   const fileRef = useRef<HTMLInputElement>(null)
   const [name, setName]                   = useState(product.name)
   const [ingredients, setIngredients]     = useState(product.ingredients)
@@ -192,7 +200,7 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
   }
 
   async function handleSave() {
-    if (!name || !ingredients || !howToUse) { setError("必須項目を入力してください"); return }
+    if (!name || !ingredients || !howToUse) { setError(p.errorEditRequired); return }
     setSaving(true); setError(null)
     try {
       const body: Record<string, string> = { name, ingredients, howToUse }
@@ -207,10 +215,10 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
         body: JSON.stringify(body),
       })
       const data = await res.json()
-      if (!res.ok || data.error) throw new Error(data.error ?? "更新失敗")
+      if (!res.ok || data.error) throw new Error(data.error ?? p.updateFailed)
       onSaved(data as Product)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "更新に失敗しました")
+      setError(err instanceof Error ? err.message : p.updateFailed)
     } finally {
       setSaving(false)
     }
@@ -220,7 +228,7 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
       <div className="rounded-2xl w-full max-w-sm p-6 space-y-4 overflow-y-auto max-h-[90vh]" style={{ background: "var(--card)" }}>
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-sm" style={{ color: "var(--text)" }}>商品を編集</h3>
+          <h3 className="font-bold text-sm" style={{ color: "var(--text)" }}>{p.editTitle}</h3>
           <button onClick={onClose}><X className="w-4 h-4" style={{ color: "var(--muted)" }} /></button>
         </div>
         <div
@@ -236,12 +244,12 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
           )}
         </div>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
-        <Field label="商品名" value={name} onChange={setName} placeholder="" required />
-        <Field label="成分表とその効能" value={ingredients} onChange={setIngredients} placeholder="" rows={3} required />
-        <Field label="使い方" value={howToUse} onChange={setHowToUse} placeholder="" rows={2} required />
-        <Field label="価格（任意）" value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
-        <Field label="アピールポイント（任意）" value={appealPoints} onChange={setAppealPoints} placeholder="" rows={2} hint="競合との差別化ポイントや強みを入力" />
-        <Field label="禁止用語（任意）" value={forbiddenWords} onChange={setForbiddenWords} placeholder="" rows={2} hint="投稿で使ってはいけないワードを入力（カンマ区切り）" />
+        <Field label={p.nameLabel} value={name} onChange={setName} placeholder="" required />
+        <Field label={p.ingredientsLabel} value={ingredients} onChange={setIngredients} placeholder="" rows={3} required />
+        <Field label={p.howToUseLabel} value={howToUse} onChange={setHowToUse} placeholder="" rows={2} required />
+        <Field label={p.priceLabel} value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
+        <Field label={p.appealLabel} value={appealPoints} onChange={setAppealPoints} placeholder="" rows={2} hint={p.appealHint} />
+        <Field label={p.forbiddenLabel} value={forbiddenWords} onChange={setForbiddenWords} placeholder="" rows={2} hint={p.forbiddenHint} />
         <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
         {error && <p className="text-xs text-red-600">{error}</p>}
         <button
@@ -250,7 +258,7 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
           className="w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white disabled:opacity-60"
           style={{ background: "var(--accent)" }}
         >
-          {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : "保存する"}
+          {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : t.common.save}
         </button>
       </div>
     </div>
@@ -258,6 +266,9 @@ function EditModal({ product, onClose, onSaved }: { product: Product; onClose: (
 }
 
 export default function V3ProductsPage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const p = t.products
   const { products, loading, addProduct, updateProduct, removeProduct } = useProducts()
   const fileRef = useRef<HTMLInputElement>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -291,7 +302,7 @@ export default function V3ProductsPage() {
 
   async function handleSave() {
     if (!name || !ingredients || !howToUse || !base64) {
-      setError("必須項目（商品名・成分・使い方・画像）をすべて入力してください")
+      setError(p.errorRequired)
       return
     }
     setSaving(true); setError(null)
@@ -310,7 +321,7 @@ export default function V3ProductsPage() {
         }),
       })
       const data = await res.json()
-      if (!res.ok || data.error) throw new Error(data.error ?? "登録失敗")
+      if (!res.ok || data.error) throw new Error(data.error ?? p.registerFailed)
       addProduct(data as Product)
       setName(""); setIngredients(""); setHowToUse(""); setPrice("")
       setAppealPoints(""); setForbiddenWords(""); setPdfText("")
@@ -319,7 +330,7 @@ export default function V3ProductsPage() {
       setSuccess(true)
       setTimeout(() => setSuccess(false), 2500)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登録に失敗しました")
+      setError(err instanceof Error ? err.message : p.registerFailed)
     } finally {
       setSaving(false)
     }
@@ -328,7 +339,7 @@ export default function V3ProductsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>商品管理</h1>
+        <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>{p.pageTitle}</h1>
         <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: "var(--accent-light)", color: "var(--accent)" }}>
           {products.length}件
         </span>
@@ -340,11 +351,11 @@ export default function V3ProductsPage() {
           className="w-full lg:flex-shrink-0 lg:w-80 space-y-4 rounded-2xl p-6"
           style={{ background: "var(--card)", border: "1px solid var(--border)" }}
         >
-          <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>新規商品を登録</h2>
+          <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>{p.newProduct}</h2>
 
           <div>
             <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
-              商品画像 <span style={{ color: "var(--accent)" }}>*</span>
+              {p.imageLabel} <span style={{ color: "var(--accent)" }}>*</span>
             </label>
             <div
               onClick={() => fileRef.current?.click()}
@@ -357,20 +368,20 @@ export default function V3ProductsPage() {
               ) : (
                 <div className="text-center">
                   <Upload className="w-5 h-5 mx-auto mb-1" style={{ color: "var(--accent)" }} />
-                  <p className="text-xs font-medium" style={{ color: "var(--accent)" }}>クリックしてアップロード</p>
-                  <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>JPG / PNG</p>
+                  <p className="text-xs font-medium" style={{ color: "var(--accent)" }}>{p.imageDrop}</p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>{p.imageFormats}</p>
                 </div>
               )}
             </div>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
           </div>
 
-          <Field label="商品名" value={name} onChange={setName} placeholder="例: 22:00 アネトス クレンジングウォーター" required />
-          <Field label="成分表とその効能" value={ingredients} onChange={setIngredients} placeholder="例: セラミド配合で肌バリアを補強..." rows={4} required hint="主要成分と、それぞれの効能をできるだけ詳しく" />
-          <Field label="使い方" value={howToUse} onChange={setHowToUse} placeholder="例: コットンに染み込ませて優しく拭き取る" rows={2} required />
-          <Field label="価格（任意）" value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
-          <Field label="アピールポイント（任意）" value={appealPoints} onChange={setAppealPoints} placeholder="例: 敏感肌処方・無香料・皮膚科医監修" rows={2} hint="競合との差別化ポイント・強みを入力" />
-          <Field label="禁止用語（任意）" value={forbiddenWords} onChange={setForbiddenWords} placeholder="例: 治る, 治療する, メラニン分解" rows={2} hint="薬機法NGワードや使いたくない表現（カンマ区切り）" />
+          <Field label={p.nameLabel} value={name} onChange={setName} placeholder="例: 22:00 アネトス クレンジングウォーター" required />
+          <Field label={p.ingredientsLabel} value={ingredients} onChange={setIngredients} placeholder="例: セラミド配合で肌バリアを補強..." rows={4} required hint={p.ingredientsHint} />
+          <Field label={p.howToUseLabel} value={howToUse} onChange={setHowToUse} placeholder="例: コットンに染み込ませて優しく拭き取る" rows={2} required />
+          <Field label={p.priceLabel} value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
+          <Field label={p.appealLabel} value={appealPoints} onChange={setAppealPoints} placeholder="例: 敏感肌処方・無香料・皮膚科医監修" rows={2} hint={p.appealHint} />
+          <Field label={p.forbiddenLabel} value={forbiddenWords} onChange={setForbiddenWords} placeholder="例: 治る, 治療する, メラニン分解" rows={2} hint={p.forbiddenHint} />
           <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
 
           {error && (
@@ -380,7 +391,7 @@ export default function V3ProductsPage() {
           )}
           {success && (
             <div className="px-3 py-2 rounded-lg" style={{ background: "var(--accent-light)", border: "1px solid var(--accent)" }}>
-              <p className="text-xs font-bold" style={{ color: "var(--accent)" }}>✓ 登録しました</p>
+              <p className="text-xs font-bold" style={{ color: "var(--accent)" }}>{p.successMsg}</p>
             </div>
           )}
 
@@ -393,7 +404,7 @@ export default function V3ProductsPage() {
             {saving ? (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
-              <><Plus className="w-4 h-4" />登録する</>
+              <><Plus className="w-4 h-4" />{t.common.register}</>
             )}
           </button>
         </div>
@@ -407,7 +418,7 @@ export default function V3ProductsPage() {
           ) : products.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3" style={{ color: "var(--muted)" }}>
               <Package className="w-10 h-10" style={{ color: "var(--border)" }} />
-              <p className="text-sm">まだ商品が登録されていません</p>
+              <p className="text-sm">{p.noProducts}</p>
             </div>
           ) : (
             <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>

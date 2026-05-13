@@ -3,43 +3,13 @@
 import { useState, useEffect, useRef } from "react"
 import { Upload, Trash2, ChevronDown, ChevronUp, Image, X, ChevronLeft, ChevronRight, Plus, CheckCircle2, AlertCircle, BarChart2, Sparkles, Pencil, Check, EyeOff, Eye } from "lucide-react"
 import type { BenchmarkPost, HookType, StructureType, CompositionType } from "@/types/v2"
+import { useLanguage } from "@/context/language"
+import { useT } from "@/lib/i18n"
 
-const POST_TYPE_LABELS: Record<string, string> = {
-  tips: "Tips", product: "商品", mixed: "混合",
-}
-const POST_TYPE_DESCRIPTIONS: Record<string, string> = {
-  tips:    "ノウハウ・情報系（商品なし）",
-  product: "商品レビュー・購買訴求（商品が主役）",
-  mixed:   "Tips主体 ＋ 商品スポット1〜2枚",
-}
 const POST_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   tips:    { bg: "#2563eb33", text: "#93c5fd" },
   product: { bg: "#f59e0b33", text: "#fcd34d" },
   mixed:   { bg: "#10b98133", text: "#6ee7b7" },
-}
-const TONE_LABELS: Record<string, string> = {
-  emotional: "感情", informative: "情報", review: "レビュー", entertainment: "エンタメ",
-}
-const HOOK_LABELS: Record<HookType, string> = {
-  F1: "F1 自己同一化",
-  F2: "F2 数字n選",
-  F3: "F3 逆張り",
-  F4: "F4 危機煽り",
-  F5: "F5 即効ベネ",
-}
-const STRUCTURE_LABELS: Record<StructureType, string> = {
-  S1: "S1 フル装備",
-  S2: "S2 最短",
-  S3: "S3 共感型",
-  S4: "S4 カタログ",
-  S5: "S5 証拠先導",
-}
-const COMPOSITION_LABELS: Record<CompositionType, string> = {
-  C1: "C1 テキスト主体",
-  C2: "C2 写真メイン",
-  C3: "C3 表リスト",
-  C4: "C4 B/A比較",
-  C5: "C5 ムード重視",
 }
 
 type BulkPostStatus = "idle" | "uploading" | "done" | "error"
@@ -64,6 +34,15 @@ function newBulkPost(): BulkPost {
 }
 
 export default function BenchmarkPage() {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const bm = t.benchmark
+  const POST_TYPE_LABELS: Record<string, string> = bm.postType
+  const POST_TYPE_DESCRIPTIONS: Record<string, string> = bm.postTypeDesc
+  const TONE_LABELS: Record<string, string> = bm.tone
+  const HOOK_LABELS: Record<HookType, string> = bm.hook
+  const STRUCTURE_LABELS: Record<StructureType, string> = bm.structure
+  const COMPOSITION_LABELS: Record<CompositionType, string> = bm.composition
   const [accountName, setAccountName]     = useState("")
   const [folderName, setFolderName]       = useState("")
   const [caption, setCaption]             = useState("")
@@ -1211,6 +1190,9 @@ function MiniBar({ label, count, total, color }: { label: string; count: number;
 }
 
 function AccountAnalysis({ posts }: { posts: BenchmarkPost[] }) {
+  const { lang } = useLanguage()
+  const t = useT(lang)
+  const bm = t.benchmark
   const s = computeAccountStats(posts)
   const accountName = posts[0]?.accountName ?? ""
 
@@ -1218,11 +1200,14 @@ function AccountAnalysis({ posts }: { posts: BenchmarkPost[] }) {
   const [loadingReport, setLoading] = useState(false)
   const [reportError, setReportError] = useState("")
 
+  const HOOK_LABELS:        Record<string, string> = bm.hook
+  const STRUCTURE_LABELS:   Record<string, string> = bm.structure
+  const COMPOSITION_LABELS: Record<string, string> = bm.composition
   const HOOK_COLORS:   Record<string, string> = { F1: "#7c3aed", F2: "#9333ea", F3: "#a855f7", F4: "#c084fc", F5: "#d8b4fe" }
   const STRUCT_COLORS: Record<string, string> = { S1: "#0e7490", S2: "#0891b2", S3: "#06b6d4", S4: "#67e8f9", S5: "#a5f3fc" }
   const COMP_COLORS:   Record<string, string> = { C1: "#b45309", C2: "#ca8a04", C3: "#eab308", C4: "#fbbf24", C5: "#fde68a" }
   const TYPE_COLORS: Record<string, string>   = { tips: "#3b82f6", product: "#f59e0b", mixed: "#10b981" }
-  const TYPE_LABELS: Record<string, string>   = { tips: "Tips", product: "商品", mixed: "混合" }
+  const TYPE_LABELS: Record<string, string>   = { tips: bm.postType.tips, product: bm.postType.product, mixed: bm.postType.mixed }
 
   const hookTotal   = Object.values(s.hookCounts).reduce((a, b) => a + b, 0)
   const structTotal = Object.values(s.structCounts).reduce((a, b) => a + b, 0)
