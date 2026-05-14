@@ -14,7 +14,7 @@ import {
 import { loadProducts } from "@/lib/products"
 import { selectTypeCombination, generateV3Post, isDuplicatePost } from "@/lib/v3Generate"
 import { describeV3SlideStyle } from "@/lib/referenceV2"
-import { generateV2Slide, generateBaseSlide } from "@/lib/fal"
+import { generateV2Slide } from "@/lib/fal"
 import { uploadSlideBuffers } from "@/lib/storage"
 import { calcFalCost, formatCost } from "@/lib/aiCost"
 import type { PostType, CompositionType, HookType, StructureType, GeneratedSlide, CompetitorProduct } from "@/types/v2"
@@ -295,63 +295,95 @@ export async function POST(
       competitors = await dbLoadCompetitorProducts(job.productId).catch(() => [])
     }
 
-    // ─── テキスト生成 ──────────────────────────────────────────────
-    await dbUpdateJob(jobId, { status: "text_generating" })
-
-    const types = selectTypeCombination(persona, benchmarkPosts, job.postType as PostType)
-
     const hasSlidUrls = (b: (typeof benchmarkPosts)[0]) => (b.slideUrls ?? []).length > 0
-    let selectedBenchmark = job.benchmarkFolderPath
-      ? benchmarkPosts.find(b => b.folderPath === job.benchmarkFolderPath && hasSlidUrls(b))
-      : undefined
-    if (!selectedBenchmark) {
-      const typeMatched = benchmarkPosts.filter(b =>
-        b.postType === job.postType && b.structureType === types.structureType && hasSlidUrls(b),
-      )
-      const postMatched = benchmarkPosts.filter(b => b.postType === job.postType && hasSlidUrls(b))
-      const anyMatched  = benchmarkPosts.filter(hasSlidUrls)
-      const pool = typeMatched.length > 0 ? typeMatched : postMatched.length > 0 ? postMatched : anyMatched
-      selectedBenchmark = pool[Math.floor(Math.random() * pool.length)]
+
+    // ─── テキスト生成 or リトライ時スキップ ──────────────────────
+    // job.textResult が既にある = 前回の実行が image_generating 中にタイムアウトしたリトライ。
+    // テキスト生成はスキップして画像生成から再開する。
+    let textResult: NonNullable<import("@/types/v2").GenerationJob["textResult"]>
+    let selectedBenchmark: (typeof benchmarkPosts)[0] | undefined
+
+    if (job.textResult) {
+      // ─ リトライ: 既存 textResult を再利用 ─
+      textResult = job.textResult
+      console.log(`[v4/process] job ${jobId} has existing textResult — skipping text generation (retry)`)
+
+      // 前回に保存した refBenchmark があれば同じベンチマークを使う
+      selectedBenchmark = job.refBenchmark
+        ? benchmarkPosts.find(b => b.folderPath === job.refBenchmark && hasSlidUrls(b))
+        : undefined
+
+      // 見つからなければ通常の選定ロジックにフォールバック
+      if (!selectedBenchmark) {
+        const pool = benchmarkPosts.filter(hasSlidUrls)
+        selectedBenchmark = pool[Math.floor(Math.random() * pool.length)]
+      }
+
+      await dbUpdateJob(jobId, { status: "image_generating" })
+    } else {
+      // ─ 通常: テキスト生成 ─
+      await dbUpdateJob(jobId, { status: "text_generating" })
+
+      const types = selectTypeCombination(persona, benchmarkPosts, job.postType as PostType)
+
+      selectedBenchmark = job.benchmarkFolderPath
+        ? benchmarkPosts.find(b => b.folderPath === job.benchmarkFolderPath && hasSlidUrls(b))
+        : undefined
+      if (!selectedBenchmark) {
+        const typeMatched = benchmarkPosts.filter(b =>
+          b.postType === job.postType && b.structureType === types.structureType && hasSlidUrls(b),
+        )
+        const postMatched = benchmarkPosts.filter(b => b.postType === job.postType && hasSlidUrls(b))
+        const anyMatched  = benchmarkPosts.filter(hasSlidUrls)
+        const pool = typeMatched.length > 0 ? typeMatched : postMatched.length > 0 ? postMatched : anyMatched
+        selectedBenchmark = pool[Math.floor(Math.random() * pool.length)]
+      }
+      const targetSlideCount = selectedBenchmark ? (selectedBenchmark.slideUrls ?? []).length : undefined
+
+      const samplesExact = benchmarkPosts.filter(b => b.postType === job.postType)
+      const benchmarkSamples = samplesExact.length > 0
+        ? samplesExact.slice(0, 3)
+        : benchmarkPosts.filter(b => b.postType === "tips").slice(0, 3)
+
+      const recentPosts = await dbLoadRecentPostsByPersona(job.personaId, 30).catch(() => [])
+      const history = recentPosts.map(p => p.overallTitle)
+
+      // ベンチマークの slideStructure から商品スロット数を正確に取得して競合件数を制限
+      const benchmarkStructure = selectedBenchmark?.slideStructure ?? []
+      const isProductRole = (role: string) =>
+        ["商品", "item", "アイテム", "product"].some(kw => role.toLowerCase().includes(kw))
+      const benchmarkProductSlots = benchmarkStructure.filter(s => isProductRole(s.role)).length
+      const maxCompetitors = targetSlideCount !== undefined
+        ? benchmarkProductSlots > 0
+          ? Math.max(0, benchmarkProductSlots - 1)
+          : Math.max(0, targetSlideCount - 3)
+        : competitors.length
+      const trimmedCompetitors = competitors.slice(0, maxCompetitors)
+
+      const generateParams = {
+        persona, postType: job.postType as PostType, product, types, benchmarkSamples,
+        competitors: trimmedCompetitors, targetSlideCount,
+        refSlideStructure: benchmarkStructure.length > 0 ? benchmarkStructure : undefined,
+        history,
+      }
+      let generated = await generateV3Post(generateParams)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const duplicate = await isDuplicatePost(generated.overallTitle, history)
+        if (!duplicate) break
+        generated = await generateV3Post(generateParams)
+      }
+
+      textResult = { types, generated }
+      // refBenchmark を image_generating 時点で保存しておく（タイムアウト後のリトライで同じベンチマークを使えるようにするため）
+      await dbUpdateJob(jobId, {
+        status: "image_generating",
+        textResult,
+        refBenchmark: selectedBenchmark!.folderPath,
+      })
     }
-    const targetSlideCount = selectedBenchmark ? (selectedBenchmark.slideUrls ?? []).length : undefined
 
-    const samplesExact = benchmarkPosts.filter(b => b.postType === job.postType)
-    const benchmarkSamples = samplesExact.length > 0
-      ? samplesExact.slice(0, 3)
-      : benchmarkPosts.filter(b => b.postType === "tips").slice(0, 3)
-
-    const recentPosts = await dbLoadRecentPostsByPersona(job.personaId, 30).catch(() => [])
-    const history = recentPosts.map(p => p.overallTitle)
-
-    // ベンチマークの slideStructure から商品スロット数を正確に取得して競合件数を制限
-    // 役割に「商品」を含むスライドを商品スロットと判定し、-1（自社商品1枚分）が最大競合件数
-    // slideStructure が空の場合: 旧来の targetSlideCount - 3 にフォールバック
-    const benchmarkStructure = selectedBenchmark?.slideStructure ?? []
-    const isProductRole = (role: string) =>
-      ["商品", "item", "アイテム", "product"].some(kw => role.toLowerCase().includes(kw))
-    const benchmarkProductSlots = benchmarkStructure.filter(s => isProductRole(s.role)).length
-    const maxCompetitors = targetSlideCount !== undefined
-      ? benchmarkProductSlots > 0
-        ? Math.max(0, benchmarkProductSlots - 1)   // 正確: 商品スロット数 − 自社1枚
-        : Math.max(0, targetSlideCount - 3)         // fallback: フック+自社+CTA = 3固定
-      : competitors.length
-    const trimmedCompetitors = competitors.slice(0, maxCompetitors)
-
-    const generateParams = {
-      persona, postType: job.postType as PostType, product, types, benchmarkSamples,
-      competitors: trimmedCompetitors, targetSlideCount,
-      refSlideStructure: benchmarkStructure.length > 0 ? benchmarkStructure : undefined,
-      history,
-    }
-    let generated = await generateV3Post(generateParams)
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const duplicate = await isDuplicatePost(generated.overallTitle, history)
-      if (!duplicate) break
-      generated = await generateV3Post(generateParams)
-    }
-
-    const textResult = { types, generated }
-    await dbUpdateJob(jobId, { status: "image_generating", textResult })
+    // textResult から types / generated を取り出す（通常生成 / リトライ両対応）
+    const { types, generated } = textResult
 
     // ─── 画像生成 ──────────────────────────────────────────────────
     const benchmarkUrls = selectedBenchmark!.slideUrls
@@ -408,87 +440,18 @@ export async function POST(
       return { ...result, slideNumber: slide.slideNumber, index: i }
     }
 
-    // 背景グループ対応: 同背景スライドをグループ化してベース画像を共有
-    // 競合比較投稿は自動で全スライドを1グループ化（同一背景を強制）
-    // 背景グループは 商品比較投稿（product/mixed）のみに適用する
-    // tips投稿ではベンチマークのテキスト配置・スタイルを優先するためグループ化しない
-    const rawBackgroundGroups = selectedBenchmark!.backgroundGroups as number[][] | null | undefined
-    const backgroundGroups = (jobPostType === "product" || jobPostType === "mixed")
-      ? (rawBackgroundGroups ?? (competitors.length > 0 ? [slides.map((_, i) => i)] : null))
-      : null
-
+    // 全スライド並列生成。
+    // 以前は background_groups による「素背景を先に逐次生成→全スライド並列」の2段階処理を
+    // 行っていたが、素背景生成(~70s) + スライド生成(~70s) = ~140s の逐次 FAL 呼び出しが
+    // Vercel 300s 制限に近づいてジョブがスタックする原因になっていた。
+    // すべて並列にすることで FAL 合計時間を最大 ~70s に収める。
     const slideResults: SlideResult[] = new Array(slides.length)
-
-    if (backgroundGroups && backgroundGroups.length > 0) {
-      await Promise.all(backgroundGroups.map(async (group) => {
-        const validIndices = group.filter(bi => bi < slides.length)
-        if (validIndices.length === 0) return
-
-        if (validIndices.length === 1) {
-          slideResults[validIndices[0]] = await generateOneSlide(validIndices[0]).catch(() =>
-            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[validIndices[0]].slideNumber, index: validIndices[0] } as SlideResult)
-          )
-          return
-        }
-
-        // 複数スライドが同背景: 素背景を先に1枚生成してから全スライドに使い回す
-        const first = validIndices[0]
-        const firstStyleDesc = styleDescMap.get(slideRefUrls[first]) ?? ""
-        console.log(`[v4/process] group ${JSON.stringify(validIndices)}: 素背景を生成中...`)
-        const baseResult = await generateBaseSlide({
-          refImageUrl:      slideRefUrls[first],
-          styleDescription: [firstStyleDesc, compositionHint].filter(Boolean).join("  "),
-          colorPalette,
-          visualProfile,
-          personaHint,
-        })
-
-        let groupBaseUrl: string | undefined
-        if (baseResult.buffer) {
-          const [url] = await uploadSlideBuffers([baseResult.buffer])
-          groupBaseUrl = url
-          console.log(`[v4/process] 素背景アップロード完了: ${url.slice(0, 60)}`)
-        } else {
-          // 素背景生成失敗: 旧来フォールバック（1枚目を通常生成して残りの参照に使う）
-          console.warn(`[v4/process] 素背景生成失敗 — フォールバック`)
-          const firstResult = await generateOneSlide(first).catch(() =>
-            ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[first].slideNumber, index: first } as SlideResult)
-          )
-          slideResults[first] = firstResult
-          if (firstResult.buffer) {
-            const [url] = await uploadSlideBuffers([firstResult.buffer])
-            groupBaseUrl = url
-            slideResults[first] = { ...firstResult, buffer: null, _uploadedUrl: url } as SlideResult & { _uploadedUrl: string }
-          }
-          for (const bi of validIndices.slice(1)) {
-            if (bi >= slides.length) continue
-            slideResults[bi] = await generateOneSlide(bi, groupBaseUrl).catch(() =>
-              ({ buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi } as SlideResult)
-            )
-          }
-          return
-        }
-
-        // 素背景取得成功: 全スライドを並列生成
-        const groupSettled = await Promise.allSettled(
-          validIndices.filter(bi => bi < slides.length).map(bi => generateOneSlide(bi, groupBaseUrl))
-        )
-        groupSettled.forEach((r, idx) => {
-          const bi = validIndices[idx]
-          slideResults[bi] = r.status === "fulfilled"
-            ? r.value
-            : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[bi].slideNumber, index: bi }
-        })
-      }))
-    } else {
-      // 背景グループなし: 全スライド並列生成（従来通り）
-      const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
-      settled.forEach((s, i) => {
-        slideResults[i] = s.status === "fulfilled"
-          ? s.value
-          : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i }
-      })
-    }
+    const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
+    settled.forEach((s, i) => {
+      slideResults[i] = s.status === "fulfilled"
+        ? s.value
+        : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i }
+    })
 
     // null でないバッファだけアップロード（素背景フォールバック時の1枚目は既アップロード済みなので除く）
     const toUpload = slideResults.filter((r): r is SlideResult & { buffer: Buffer } => r?.buffer !== null && r?.buffer !== undefined)
