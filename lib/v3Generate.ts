@@ -44,6 +44,15 @@ const STRUCTURE_DESCRIPTIONS: Record<StructureType, string> = {
   S5: "証拠先導型（フック=ビフォーアフター→ステップ→一推し・5〜7枚）",
 }
 
+// refSlideStructure がある時（枚数が外部から固定される時）に使うバージョン — 枚数範囲を除去
+const STRUCTURE_DESCRIPTIONS_NOCOUNT: Record<StructureType, string> = {
+  S1: "フル装備型（フック→導入→tipsシリーズ→CTA→プロフィール訴求）",
+  S2: "最短型（フック→tipsシリーズ→CTA）",
+  S3: "共感型（フック→共感→ノウハウ→マインド締め・情緒系）",
+  S4: "カタログ型（フック→商品紹介列→CTA）",
+  S5: "証拠先導型（フック=ビフォーアフター→ステップ→一推し）",
+}
+
 const COMPOSITION_DESCRIPTIONS: Record<CompositionType, string> = {
   C1: "テキスト主体（白背景・大文字・余白多）",
   C2: "写真メイン（人物・商品中心、テキスト控えめ）",
@@ -237,7 +246,7 @@ ${history.slice(0, 30).map(t => `- ${t}`).join("\n")}
     ? `\n【ベンチマーク投稿の実際の構造サンプル（このペルソナの源泉アカウントの ${postType === "mixed" ? "mixed/tips" : postType} 投稿。構造をそのまま参考にする）】
 ${benchmarkSamples.slice(0, 3).map((s, i) => `
 サンプル${i + 1}（${s.folderPath}・${s.slideCount}枚・hook=${s.hookMain ?? "?"}・struct=${s.structureType ?? "?"}）:
-${(s.slideStructure ?? []).map(sl => `  ${sl.slide}. [${sl.role}] ${sl.description}`).join("\n")}
+${(s.slideStructure ?? []).map(sl => `  ${sl.slide}. [${sl.role}]`).join("\n")}
 `).join("\n")}
 
 ⚠ ベンチマーク駆動原則:
@@ -262,7 +271,7 @@ ${historyBlock}${productBlock}${competitorsBlock}${benchmarkBlock}
 
 【3つの型指定（このパターンで作る）】
 - 心理フック型 ${types.hookType}: ${HOOK_DESCRIPTIONS[types.hookType]}
-- 投稿構造型   ${types.structureType}: ${STRUCTURE_DESCRIPTIONS[types.structureType]}
+- 投稿構造型   ${types.structureType}: ${refSlideStructure && refSlideStructure.length > 0 ? STRUCTURE_DESCRIPTIONS_NOCOUNT[types.structureType] : STRUCTURE_DESCRIPTIONS[types.structureType]}
 - 構図/レイアウト型 ${types.compositionType}: ${COMPOSITION_DESCRIPTIONS[types.compositionType]}
 
 【最重要ルール: 自己同一化フック原理】
@@ -292,55 +301,49 @@ ${postType === "tips" ? `【TIPS投稿の絶対禁止ルール】
 - ❌ NG: フックに bullets / accent / 補足説明をつける（情報量が多すぎる）
 - ✅ OK: headline 1〜2行（合計 8〜20文字目安）の強い表現のみ。bullets は **空配列**、accent は **空文字**
 
+${refSlideStructure && refSlideStructure.length > 0 ? `【スライド構成テンプレート（完全固定・最重要）】
+ベンチマーク投稿の構成をそのままコピーします。
+以下の slide_number・tag・枚数は **絶対に変更しない**。headline・bullets・accent の「内容」だけを生成すること。
+1スライドも増やさず・減らさず・並び替えず、テンプレート通りに出力する。
+
+${refSlideStructure.map(s => `  ${s.slide}枚目: tag="${s.role}"`).join("\n")}
+
+合計 ${refSlideStructure.length} 枚固定（${refSlideStructure.length}枚以外はルール違反）。
+` : ""}
 【出力フォーマット】
 JSONのみ（前後に説明・コードブロック禁止）:
 {
   "overall_title": "投稿全体の魅力的な一行タイトル",
   "slides": [
-    {"slide_number": 1, "tag": "フック", "headline": "1〜2行の強いタイトル", "bullets": [], "accent": ""},
-    {"slide_number": 2, "tag": "...", "headline": "...", "bullets": ["短い説明1", "短い説明2"], "accent": "強調ワード"}
+${refSlideStructure && refSlideStructure.length > 0
+  ? refSlideStructure.map((s, i) => {
+      const isHook = s.role.includes("フック") || s.slide === 1
+      const entry = `    {"slide_number": ${s.slide}, "tag": "${s.role}", "headline": "★${s.role}のheadlineを書く★", "bullets": ${isHook ? "[]" : '["内容1", "内容2"]'}, "accent": "${isHook ? "" : "強調ワード"}"}`
+      return i < refSlideStructure.length - 1 ? entry + "," : entry
+    }).join("\n")
+  : `    {"slide_number": 1, "tag": "フック", "headline": "1〜2行の強いタイトル", "bullets": [], "accent": ""},
+    {"slide_number": 2, "tag": "...", "headline": "...", "bullets": ["短い説明1", "短い説明2"], "accent": "強調ワード"}`
+}
   ],
   "caption": "Lemon8キャプション原文（150〜400文字・自然な口調・絵文字使用OK・改行は\\nでエスケープ）"
 }
 
 ⚠ bullets の絶対ルール: 各要素の先頭に番号（1. 2. 3.）・記号（・ー- *）を付けない。プレーンテキストのみ。
-
-${targetSlideCount
-  ? `【スライド枚数（絶対厳守）】${targetSlideCount}枚ちょうど。1枚でも多くても少なくてもNG。${
-      (postType === "product" || postType === "mixed") && competitors && competitors.length > 0
-        ? (() => {
-            // ベンチマークの slideStructure がある場合: スロット別の厳密な内訳を生成
-            const PRODUCT_KW = ["商品", "item", "アイテム", "product"]
-            const isProductRole = (role: string) => PRODUCT_KW.some(kw => role.toLowerCase().includes(kw))
-
-            if (refSlideStructure && refSlideStructure.length > 0) {
-              const productSlots = refSlideStructure.filter(s => isProductRole(s.role))
-              const lines = refSlideStructure.map(s => {
-                if (!isProductRole(s.role)) {
-                  return `  ${s.slide}枚目: 【${s.role}】— ベンチマーク通りの非商品スライド（削除・省略・変更禁止）`
-                }
-                const pIdx = productSlots.findIndex(p => p.slide === s.slide)
-                if (pIdx === productSlots.length - 1) {
-                  // 最後の商品スロット = 自社商品
-                  return `  ${s.slide}枚目: 【自社商品（anetos）${pIdx + 1}つ目】— "${product?.name ?? "anetos"}" の独立スライド`
-                }
-                const c = competitors[pIdx]
-                return `  ${s.slide}枚目: 【競合商品 ${pIdx + 1}つ目】— ${c ? `"${c.brandName} ${c.productName}"` : `商品リスト[C${pIdx + 1}]`}`
-              })
-              return `\n- 内訳（ベンチマーク構造を完全厳守）:\n${lines.join("\n")}\n- 非商品スライドの役割・枚数・位置をベンチマーク通りに維持（絶対に削除・追加・移動しない）\n- 競合商品 ${competitors.length}件は上記スロット通りに配置し、全件使い切ること`
-            }
-
-            // fallback: slideStructure なし → シンプル内訳（旧来）
-            return `\n- 内訳（厳守）: フック1枚 + 競合商品${competitors.length}枚 + 自社商品(anetos)1枚 + CTA1枚 = ${targetSlideCount}枚\n- 順番: フック → 競合[1〜${competitors.length}] → 自社(anetos)[${competitors.length + 1}つ目] → CTA\n- 渡された競合商品リスト（${competitors.length}件）を過不足なく全て使い、その後に必ず自社商品スライドを置くこと`
-          })()
-        : ""
-    }`
-  : `スライド枚数の目安:
+${refSlideStructure && refSlideStructure.length > 0
+  ? `⚠ slide_number と tag はテンプレートから変更禁止。上記JSON出力の slide_number・tag を一字一句そのまま出力すること。`
+  : `${targetSlideCount
+      ? `【スライド枚数（絶対厳守）】${targetSlideCount}枚ちょうど。1枚でも多くても少なくてもNG。${
+          (postType === "product" || postType === "mixed") && competitors && competitors.length > 0
+            ? `\n- 内訳（厳守）: フック1枚 + 競合商品${competitors.length}枚 + 自社商品(anetos)1枚 + CTA1枚 = ${targetSlideCount}枚\n- 順番: フック → 競合[1〜${competitors.length}] → 自社(anetos)[${competitors.length + 1}つ目] → CTA`
+            : ""
+        }`
+      : `スライド枚数の目安:
 - S1 フル装備: 6〜8枚
 - S2 最短: 4〜5枚
 - S3 共感型: 5〜6枚
 - S4 カタログ: 7〜9枚
 - S5 証拠先導: 5〜7枚`
+    }`
 }
 
 【JSON出力ルール】

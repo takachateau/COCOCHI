@@ -173,12 +173,12 @@ async function falQueueGenerate(
   input: Record<string, unknown>,
 ): Promise<FalResult> {
   const POLL_INTERVAL_MS = 5_000   // 5秒ごとにステータス確認
-  const MAX_WAIT_MS      = 85_000  // 最大85秒（Vercel 300s / 最大3並列スライド でも収まる余裕）
+  const MAX_WAIT_MS      = 130_000 // 最大130秒（edit モデルは実測 ~105s。tips: ~130s, product: base+slides≦260s, 300s制限以内）
 
   // submit 自体にも AbortController でタイムアウトを設定する
-  // → submit が応答なし（ネットワーク断）でも 30s で抜けられる
+  // → submit が応答なし（ネットワーク断）でも 15s で抜けられる
   const submitController = new AbortController()
-  const submitTimer = setTimeout(() => submitController.abort(), 30_000)
+  const submitTimer = setTimeout(() => submitController.abort(), 15_000)
   let submitted: { request_id: string }
   try {
     submitted = await fal.queue.submit(modelId, {
@@ -664,7 +664,6 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     return /^[①-⑳]/.test(first) || /^\d+[.)、．]/.test(first)
   })()
 
-  // 1bullet = 最大 22 字（28 → 22 に縮小）
   function normalizeBullet(text: string): string {
     return text
       .replace(/^[①-⑳]\s*/, "")
@@ -673,23 +672,29 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
       .replace(/[｜|]/g, " / ")
       .replace(/※\s*/g, "")
       .trim()
-      .slice(0, 22)
   }
 
   const normalizedBullets = bulletItems.map(normalizeBullet)
 
   const hasBullets = normalizedBullets.length > 0
   const structuredText = [
-    `HEADLINE (large bold): "${headline ?? ""}"`,
+    `HEADLINE (bold, medium size — NOT a full-width banner): "${headline ?? ""}"`,
     hasBullets
-      ? `BODY BULLETS (medium font — noticeably smaller than headline): ${normalizedBullets.map((b, i) =>
+      ? `BODY BULLETS (SMALL font — clearly smaller than headline): ${normalizedBullets.map((b, i) =>
           isNumberedStyle ? `"${i + 1}. ${b}"` : `"• ${b}"`
         ).join(" | ")}`
       : "NO BULLETS — do NOT add any list items, numbered items, or bullet points",
     accentText
-      ? `SMALL ACCENT text (smallest size): "${accentText.replace(/※\s*/g, "").slice(0, 20)}"`
+      ? `ACCENT text (TINY size): "${accentText.replace(/※\s*/g, "")}"`
       : null,
-    `CRITICAL LAYOUT: ALL text elements MUST be fully visible within the image frame — no clipping, no cropping at edges. Use smaller font sizes if needed to ensure every character is legible.`,
+    `TYPOGRAPHY RULES (STRICT — override all defaults): `
+    + `① Font size: READABLE on mobile — clearly legible, not tiny. `
+    + `② Headline: bold, fits within 2 lines. `
+    + `③ Bullets: show the COMPLETE text of each bullet — wrapping to 2 lines is OK if needed, but NEVER truncate mid-word. `
+    + `④ Text block max width = 80% of image width — leave RIGHT MARGIN so no character crosses the right edge. `
+    + `⑤ ALL text combined must occupy at most 45% of image area. `
+    + `⑥ Every text element has at least 5% margin from ALL image edges — ZERO clipping on any side. `
+    + `⑦ If the text would overflow any edge, REDUCE font size until every character fits completely inside the image.`,
   ].filter(Boolean).join("  ")
 
   // ─── bgInherit=true の場合: 超シンプルなテキスト置換専用プロンプトを使う ───
@@ -707,12 +712,13 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
       `- Camera angle and framing`,
       ``,
       `TEXT TO ADD (place in natural Lemon8 post layout — lower half or overlay area):`,
-      `HEADLINE (largest text, bold): "${headline}"`,
+      `HEADLINE (bold, COMPACT medium size — NOT a banner): "${headline}"`,
       hasBullets
-        ? `BODY BULLETS (medium size): ${normalizedBullets.map((b, i) =>
+        ? `BODY BULLETS (SMALL font, clearly smaller than headline): ${normalizedBullets.map((b, i) =>
             isNumberedStyle ? `"${i + 1}. ${b}"` : `"• ${b}"`).join(" | ")}`
         : `NO BODY BULLETS`,
-      accentText ? `ACCENT (small text): "${accentText}"` : null,
+      accentText ? `ACCENT (TINY size): "${accentText}"` : null,
+      `TYPOGRAPHY RULE: READABLE font size — show COMPLETE text of every bullet (wrapping to 2 lines OK, never truncate) — text block max width 80% of image — 5% margin from ALL edges — ZERO clipping — reduce font size if text would overflow.`,
       ``,
       hasProduct && productImageUrl
         ? `ALSO ADD: extract the product from Image 2 (remove its white/plain background) and place it as a clean floating cutout in the LEFT THIRD of the image, vertically centered. Size: ~35% of image width.`
@@ -830,10 +836,8 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
     + ` — Text container: if the reference has NO container → NO box or pill; if it has a pill/rounded box/overlay → replicate that exact shape and color.`
     + ` — Text position: same location (left side / top / center / etc.) as the reference.`
     + ` — Text color: same as reference. If text would be hard to read, use white with subtle dark shadow.`
-    + ` — Text size hierarchy: headline LARGE, bullets MEDIUM, accent SMALL.`
     + ` New content: ${structuredText}.`
     + ` ZERO hallucination rule: render ONLY the exact text elements listed above. If "NO BULLETS" is specified, the area below the headline must remain background — do NOT invent or add any list items, numbers, or bullet points from the reference or from context.`
-    + ` Text must not exceed 45% of image area. ALL text elements must be fully visible and never clipped by the image edge. Person and background must remain clearly visible.`
     + ` ${FONT_SPEC}`,
 
     // [7]

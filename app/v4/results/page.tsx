@@ -73,7 +73,7 @@ export default function ResultsPage() {
     setLoading(true)
     try {
       const url = mode === "trash" ? "/api/v4/generated-posts?trash=1" : "/api/v4/generated-posts"
-      const r = await fetch(url)
+      const r = await fetch(url, { cache: "no-store" })
       const d = await r.json() as { posts?: GeneratedPost[]; error?: string; _debug?: unknown }
       if (d._debug) console.log("[results] _debug:", d._debug)
       setResults(d.posts ?? [])

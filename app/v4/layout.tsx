@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader, StopCircle } from "lucide-react"
+import { ListOrdered, X, RefreshCw, CheckCircle, AlertCircle, Clock, Loader, StopCircle, RotateCcw } from "lucide-react"
 import type { GenerationJob } from "@/types/v2"
 import { useLanguage } from "@/context/language"
 import { useT } from "@/lib/i18n"
@@ -36,6 +36,7 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
   const [jobs, setJobs] = useState<GenerationJob[]>([])
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState<Set<string>>(new Set())
+  const [retrying,   setRetrying]   = useState<Set<string>>(new Set())
 
   function formatElapsed(createdAt: string): string {
     const diff = (Date.now() - new Date(createdAt).getTime()) / 1000
@@ -63,6 +64,17 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
       await fetchJobs()
     } finally {
       setCancelling(prev => { const s = new Set(prev); s.delete(jobId); return s })
+    }
+  }
+
+  async function retryJob(e: React.MouseEvent, jobId: string) {
+    e.stopPropagation()
+    setRetrying(prev => new Set(prev).add(jobId))
+    try {
+      await fetch(`/api/v4/jobs/${jobId}/retry`, { method: "POST" })
+      await fetchJobs()
+    } finally {
+      setRetrying(prev => { const s = new Set(prev); s.delete(jobId); return s })
     }
   }
 
@@ -135,6 +147,7 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
               const isDone = job.status === "done"
               const isCancellable = isActive || isPending
               const isCancelling = cancelling.has(job.id)
+              const isRetrying   = retrying.has(job.id)
               // Vercel の最大実行時間（300s）を超えたらスタックとみなす
               const elapsedSec = (Date.now() - new Date(job.updatedAt ?? job.createdAt).getTime()) / 1000
               const isStuck = isActive && elapsedSec > 360
@@ -179,7 +192,7 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                       </div>
                       {isStuck && (
                         <p className="text-[10px] mb-1" style={{ color: "#f59e0b" }}>
-                          タイムアウトの可能性。中止して再試行してください
+                          タイムアウトの可能性。再試行または中止してください
                         </p>
                       )}
                       <p className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>
@@ -231,22 +244,41 @@ function QueuePanel({ onClose, onSelectJob }: { onClose: () => void; onSelectJob
                     )}
                   </button>
 
-                  {/* 中止ボタン（処理中・待機中のみ表示） */}
-                  {isCancellable && (
-                    <button
-                      type="button"
-                      onClick={e => cancelJob(e, job.id)}
-                      disabled={isCancelling}
-                      className="flex-shrink-0 mt-0.5 w-6 h-6 rounded flex items-center justify-center transition-opacity hover:opacity-70 disabled:opacity-40"
-                      style={{ background: "#ef444422", color: "#ef4444" }}
-                      title="生成を中止する"
-                    >
-                      {isCancelling
-                        ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-                        : <StopCircle className="w-3.5 h-3.5" />
-                      }
-                    </button>
-                  )}
+                  {/* ボタン列（リトライ + 中止） */}
+                  <div className="flex-shrink-0 flex flex-col gap-1 mt-0.5">
+                    {/* リトライボタン（スタック or エラー時のみ） */}
+                    {(isStuck || job.status === "error") && (
+                      <button
+                        type="button"
+                        onClick={e => retryJob(e, job.id)}
+                        disabled={isRetrying}
+                        className="w-6 h-6 rounded flex items-center justify-center transition-opacity hover:opacity-70 disabled:opacity-40"
+                        style={{ background: "#f59e0b22", color: "#f59e0b" }}
+                        title="再試行する"
+                      >
+                        {isRetrying
+                          ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                          : <RotateCcw className="w-3.5 h-3.5" />
+                        }
+                      </button>
+                    )}
+                    {/* 中止ボタン（処理中・待機中のみ表示） */}
+                    {isCancellable && (
+                      <button
+                        type="button"
+                        onClick={e => cancelJob(e, job.id)}
+                        disabled={isCancelling}
+                        className="w-6 h-6 rounded flex items-center justify-center transition-opacity hover:opacity-70 disabled:opacity-40"
+                        style={{ background: "#ef444422", color: "#ef4444" }}
+                        title="生成を中止する"
+                      >
+                        {isCancelling
+                          ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                          : <StopCircle className="w-3.5 h-3.5" />
+                        }
+                      </button>
+                    )}
+                  </div>
                 </div>
               )
             })}
