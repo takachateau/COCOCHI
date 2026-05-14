@@ -418,49 +418,56 @@ export async function POST(
 
     const jobPostType = job.postType as PostType
 
-    async function generateOneSlide(
-      i: number,
-      overrideRefImageUrl?: string,
-    ): Promise<SlideResult> {
+    // 背景グループがある場合: グループ内全スライドが同じ参照画像（グループ先頭のURL）を使う
+    // → 旧来の「素背景生成→bgInherit」方式はモデルが背景を再生成してしまう問題があったため廃止
+    const rawBackgroundGroups = selectedBenchmark!.backgroundGroups as number[][] | null | undefined
+    const backgroundGroups = (jobPostType === "product" || jobPostType === "mixed")
+      ? (rawBackgroundGroups ?? (competitors.length > 0 ? [slides.map((_, i) => i)] : null))
+      : null
+
+    const effectiveRefUrls = [...slideRefUrls]
+    if (backgroundGroups && backgroundGroups.length > 0) {
+      backgroundGroups.forEach(group => {
+        const validIndices = group.filter(bi => bi < slides.length)
+        if (validIndices.length === 0) return
+        const groupRef = slideRefUrls[validIndices[0]]
+        validIndices.forEach(bi => { effectiveRefUrls[bi] = groupRef })
+      })
+    }
+
+    async function generateOneSlide(i: number): Promise<SlideResult> {
       const slide = slides[i]
-      const refImageUrl = overrideRefImageUrl ?? slideRefUrls[i]
+      const refImageUrl = effectiveRefUrls[i]
       const slideProduct = (jobPostType === "product" || jobPostType === "mixed")
         ? pickProductForSlide(slide, product, competitors, jobPostType)
         : null
-      const slideStyleDesc = slideRefUrls[i] ? (styleDescMap.get(slideRefUrls[i]) ?? "") : ""
+      const slideStyleDesc = refImageUrl ? (styleDescMap.get(refImageUrl) ?? "") : ""
       const finalStyleDesc = [slideStyleDesc, compositionHint].filter(Boolean).join("  ")
-      console.log(`[v4/process] slide ${i + 1} → FAL${overrideRefImageUrl ? " (bg-inherit)" : ""}`)
+      console.log(`[v4/process] slide ${i + 1} → FAL${backgroundGroups ? " (bg-group)" : ""}`)
       const result = await generateV2Slide({
         headline: slide.headline, tag: slide.tag, bullets: slide.bullets, accent: slide.accent,
         colorPalette, refImageUrl, styleDescription: finalStyleDesc,
         slideNumber: slide.slideNumber, visualProfile, personaHint,
         productImageUrl: slideProduct?.imageUrl,
-        bgInherit: !!overrideRefImageUrl,
       })
       return { ...result, slideNumber: slide.slideNumber, index: i }
     }
 
-    // 全スライド並列生成。
-    // 以前は background_groups による「素背景を先に逐次生成→全スライド並列」の2段階処理を
-    // 行っていたが、素背景生成(~70s) + スライド生成(~70s) = ~140s の逐次 FAL 呼び出しが
-    // Vercel 300s 制限に近づいてジョブがスタックする原因になっていた。
-    // すべて並列にすることで FAL 合計時間を最大 ~70s に収める。
+    // 全スライド並列生成（背景グループの有無にかかわらず同じパス）
     const slideResults: SlideResult[] = new Array(slides.length)
-    const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
-    settled.forEach((s, i) => {
-      slideResults[i] = s.status === "fulfilled"
-        ? s.value
-        : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i }
-    })
+    {
+      const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
+      settled.forEach((s, i) => {
+        slideResults[i] = s.status === "fulfilled"
+          ? s.value
+          : { buffer: null, policyFallback: false, falCalls: 1, slideNumber: slides[i].slideNumber, index: i }
+      })
+    }
 
-    // null でないバッファだけアップロード（素背景フォールバック時の1枚目は既アップロード済みなので除く）
+    // null でないバッファだけアップロード（生成失敗スライドは除く）
     const toUpload = slideResults.filter((r): r is SlideResult & { buffer: Buffer } => r?.buffer !== null && r?.buffer !== undefined)
     const uploadedUrls = toUpload.length > 0 ? await uploadSlideBuffers(toUpload.map(r => r.buffer)) : []
     const urlByIndex = new Map<number, string>()
-    slideResults.forEach((r, i) => {
-      const ext = r as SlideResult & { _uploadedUrl?: string }
-      if (ext?._uploadedUrl) urlByIndex.set(i, ext._uploadedUrl)
-    })
     toUpload.forEach((r, ui) => urlByIndex.set(r.index, uploadedUrls[ui]))
     const imageUrls = slides.map((_, i) => urlByIndex.get(i) ?? null)
 
@@ -485,7 +492,12 @@ export async function POST(
       imageCost,
     })
 
-    // 生成結果を generated_posts にも保存（結果ページで表示するため）
+    // 生成結果を generated_posts にも保存（画像が1枚以上ある場合のみ）
+    const validImageUrls = imageUrls.filter((u): u is string => u !== null)
+    if (validImageUrls.length === 0) {
+      console.warn(`[v4/process] job ${jobId}: 有効な画像が0枚のため generated_posts への保存をスキップ`)
+      return NextResponse.json({ ok: true })
+    }
     await dbSaveGeneratedPost({
       personaId:       job.personaId,
       postType:        job.postType as PostType,
@@ -497,7 +509,7 @@ export async function POST(
       structureType:   types.structureType,
       compositionType: types.compositionType,
       refBenchmark:    selectedBenchmark!.folderPath,
-      imageUrls:       imageUrls.filter((u): u is string => u !== null),
+      imageUrls:       validImageUrls,
       imageCost,
     }).catch(err => console.warn("[v4/process] generated_posts 保存失敗（続行）:", err))
 

@@ -10,6 +10,26 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
+// USE_LOCAL_DB=true のとき generated_posts / generation_jobs を SQLite に保存する
+const IS_LOCAL = process.env.USE_LOCAL_DB === "true"
+
+// localDb モジュールを動的ロード（Vercel では USE_LOCAL_DB が未設定のため実行されない）
+async function local() {
+  return (await import("./localDb")) as typeof import("./localDb")
+}
+
+// persona 名をまとめて取得（localDb がペルソナ名を参照するために使う）
+async function _fetchPersonaNames(ids: string[]): Promise<Map<string, string>> {
+  const { data } = await supabase.from("personas").select("id, name").in("id", ids)
+  const map = new Map<string, string>()
+  for (const p of (data ?? [])) map.set(p.id as string, p.name as string)
+  return map
+}
+async function _fetchPersonaName(id: string): Promise<string | undefined> {
+  const { data } = await supabase.from("personas").select("name").eq("id", id).maybeSingle()
+  return (data as { name: string } | null)?.name
+}
+
 // ─── v1: PostGroup CRUD（変更なし）────────────────────────────
 
 export async function dbLoadGroups(): Promise<PostGroup[]> {
@@ -515,6 +535,7 @@ export async function dbSaveGeneratedPost(post: {
   imageUrls: string[]
   imageCost?: { jpy: string; cny: string; usd: string } | null
 }): Promise<GeneratedPost> {
+  if (IS_LOCAL) return (await local()).localSaveGeneratedPost(post)
   const { data, error } = await supabase
     .from("generated_posts")
     .insert({
@@ -553,6 +574,7 @@ export async function dbSaveGeneratedPost(post: {
 }
 
 export async function dbLoadGeneratedPosts(limit = 500): Promise<GeneratedPost[]> {
+  if (IS_LOCAL) return (await local()).localLoadGeneratedPosts(limit, _fetchPersonaNames)
   const { data, error } = await supabase
     .from("generated_posts")
     .select("*")
@@ -575,6 +597,7 @@ export async function dbLoadGeneratedPosts(limit = 500): Promise<GeneratedPost[]
 }
 
 export async function dbLoadRecentPostsByPersona(personaId: string, limit = 30): Promise<GeneratedPost[]> {
+  if (IS_LOCAL) return (await local()).localLoadRecentPostsByPersona(personaId, limit)
   const { data, error } = await supabase
     .from("generated_posts")
     .select("*")
@@ -600,6 +623,7 @@ export async function dbLoadRecentPostsByPersona(personaId: string, limit = 30):
 // 完全削除は dbPurge* を呼び出す。
 
 export async function dbDeleteGeneratedPost(id: string): Promise<void> {
+  if (IS_LOCAL) return (await local()).localDeleteGeneratedPost(id)
   const { error } = await supabase
     .from("generated_posts")
     .update({ deleted_at: new Date().toISOString() })
@@ -608,6 +632,7 @@ export async function dbDeleteGeneratedPost(id: string): Promise<void> {
 }
 
 export async function dbDeleteJob(id: string): Promise<void> {
+  if (IS_LOCAL) return (await local()).localDeleteJob(id)
   const { error } = await supabase
     .from("generation_jobs")
     .update({ deleted_at: new Date().toISOString() })
@@ -617,6 +642,7 @@ export async function dbDeleteJob(id: string): Promise<void> {
 
 /** ゴミ箱から元に戻す（generated_posts） */
 export async function dbRestoreGeneratedPost(id: string): Promise<void> {
+  if (IS_LOCAL) return (await local()).localRestoreGeneratedPost(id)
   const { error } = await supabase
     .from("generated_posts")
     .update({ deleted_at: null })
@@ -626,6 +652,7 @@ export async function dbRestoreGeneratedPost(id: string): Promise<void> {
 
 /** ゴミ箱から元に戻す（generation_jobs） */
 export async function dbRestoreJob(id: string): Promise<void> {
+  if (IS_LOCAL) return (await local()).localRestoreJob(id)
   const { error } = await supabase
     .from("generation_jobs")
     .update({ deleted_at: null })
@@ -635,18 +662,21 @@ export async function dbRestoreJob(id: string): Promise<void> {
 
 /** 完全削除（generated_posts） */
 export async function dbPurgeGeneratedPost(id: string): Promise<void> {
+  if (IS_LOCAL) return (await local()).localPurgeGeneratedPost(id)
   const { error } = await supabase.from("generated_posts").delete().eq("id", id)
   if (error) throw new Error(`GeneratedPost purge error: ${error.message}`)
 }
 
 /** 完全削除（generation_jobs） */
 export async function dbPurgeJob(id: string): Promise<void> {
+  if (IS_LOCAL) return (await local()).localPurgeJob(id)
   const { error } = await supabase.from("generation_jobs").delete().eq("id", id)
   if (error) throw new Error(`Job purge error: ${error.message}`)
 }
 
 /** ゴミ箱に入っている投稿を取得 */
 export async function dbLoadTrashedPosts(limit = 500): Promise<GeneratedPost[]> {
+  if (IS_LOCAL) return (await local()).localLoadTrashedPosts(limit, _fetchPersonaNames)
   const { data, error } = await supabase
     .from("generated_posts")
     .select("*")
@@ -667,6 +697,7 @@ export async function dbLoadTrashedPosts(limit = 500): Promise<GeneratedPost[]> 
 
 /** ゴミ箱に入っている完了済みジョブを取得 */
 export async function dbLoadTrashedJobs(limit = 500): Promise<GenerationJob[]> {
+  if (IS_LOCAL) return (await local()).localLoadTrashedJobs(limit, _fetchPersonaNames)
   const { data, error } = await supabase
     .from("generation_jobs")
     .select("*")
@@ -686,6 +717,7 @@ export async function dbLoadTrashedJobs(limit = 500): Promise<GenerationJob[]> {
 }
 
 export async function dbUpdateGeneratedPostImages(id: string, imageUrls: string[]): Promise<void> {
+  if (IS_LOCAL) return (await local()).localUpdateGeneratedPostImages(id, imageUrls)
   const { error } = await supabase
     .from("generated_posts")
     .update({ image_urls: imageUrls })
@@ -796,6 +828,7 @@ export async function dbCreateJob(params: {
   productId?: string
   benchmarkFolderPath?: string
 }): Promise<GenerationJob> {
+  if (IS_LOCAL) return (await local()).localCreateJob(params)
   // job_type 列はオプション（マイグレーション未実行環境でも動くよう含めない）
   const { data, error } = await supabase
     .from("generation_jobs")
@@ -818,6 +851,7 @@ export async function dbCreateSlideRegenJob(params: {
   productId?:       string
   slideRegenParams: import("@/types/v2").SlideRegenParams
 }): Promise<GenerationJob> {
+  if (IS_LOCAL) return (await local()).localCreateSlideRegenJob(params)
   // slide_regen 判定は text_result の __slideRegen マーカーで行う。
   // job_type / slide_regen_params 列は不要（DB マイグレーション不要）
   const { data, error } = await supabase
@@ -845,6 +879,7 @@ export async function dbUpdateJob(id: string, update: {
   errorMessage?: string
   imageCost?: GenerationJob["imageCost"]
 }): Promise<void> {
+  if (IS_LOCAL) return (await local()).localUpdateJob(id, update)
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (update.status             !== undefined) patch.status                 = update.status
   if (update.textResult         !== undefined) patch.text_result            = update.textResult
@@ -859,6 +894,7 @@ export async function dbUpdateJob(id: string, update: {
 }
 
 export async function dbLoadJobs(limit = 50): Promise<GenerationJob[]> {
+  if (IS_LOCAL) return (await local()).localLoadJobs(limit, _fetchPersonaNames)
   const { data, error } = await supabase
     .from("generation_jobs")
     .select("*")
@@ -881,6 +917,7 @@ export async function dbLoadJobs(limit = 50): Promise<GenerationJob[]> {
 
 // 完了済みジョブをまとめて取得（結果ページの履歴マージ用）
 export async function dbLoadDoneJobs(limit = 500): Promise<GenerationJob[]> {
+  if (IS_LOCAL) return (await local()).localLoadDoneJobs(limit, _fetchPersonaNames)
   const { data, error } = await supabase
     .from("generation_jobs")
     .select("*")
@@ -903,6 +940,7 @@ export async function dbLoadDoneJobs(limit = 500): Promise<GenerationJob[]> {
 }
 
 export async function dbLoadJob(id: string): Promise<GenerationJob | null> {
+  if (IS_LOCAL) return (await local()).localLoadJob(id, _fetchPersonaName)
   const { data, error } = await supabase
     .from("generation_jobs")
     .select("*")

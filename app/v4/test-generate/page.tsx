@@ -181,7 +181,7 @@ export default function TestGeneratePage() {
       })
       const d2 = await r2.json() as { imageUrls?: (string | null)[]; refBenchmark?: string; policyFallbackSlides?: number[]; failedSlides?: number[]; error?: string; imageCost?: CostDisplay; usedBgGroupMode?: boolean; backgroundGroups?: number[][] }
       if (d2.error) throw new Error(d2.error)
-      if (!d2.imageUrls) throw new Error("画像生成失敗")
+      if (!d2.imageUrls?.filter(Boolean).length) throw new Error("画像生成失敗（有効な画像なし）")
       setImageResult({ imageUrls: d2.imageUrls, refBenchmark: d2.refBenchmark ?? "", policyFallbackSlides: d2.policyFallbackSlides ?? [], failedSlides: d2.failedSlides ?? [], usedBgGroupMode: d2.usedBgGroupMode, backgroundGroups: d2.backgroundGroups })
       if (d2.imageCost) setImageCost(d2.imageCost)
 

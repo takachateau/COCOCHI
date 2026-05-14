@@ -100,7 +100,12 @@ export async function POST(req: NextRequest) {
     const history = recentPosts.map(p => p.overallTitle)
 
     // 生成（被り判定付きリトライ・最大3回）
-    const generateParams = { persona, postType, product, types, benchmarkSamples, competitors, targetSlideCount, history }
+    const benchmarkStructure = selectedBenchmark?.slideStructure ?? []
+    const generateParams = {
+      persona, postType, product, types, benchmarkSamples, competitors, targetSlideCount,
+      refSlideStructure: benchmarkStructure.length > 0 ? benchmarkStructure : undefined,
+      history,
+    }
     let generated = await generateV3Post(generateParams)
 
     for (let attempt = 0; attempt < 2; attempt++) {
