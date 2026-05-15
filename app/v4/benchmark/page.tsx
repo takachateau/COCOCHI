@@ -81,8 +81,9 @@ export default function BenchmarkPage() {
   const [savingBio, setSavingBio]           = useState(false)
   const [loadingBio, setLoadingBio]         = useState(false)
 
-  // ─── アカウントレベル非表示 ───
-  const [deletingAccount, setDeletingAccount] = useState<string | null>(null)
+  // ─── アカウントゴミ箱（アーカイブ）───
+  const [accountArchivedMap, setAccountArchivedMap] = useState<Record<string, boolean>>({})
+  const [trashOpen, setTrashOpen] = useState(false)
 
   // ─── 背景グループ設定 ───
   const [bgGroupState, setBgGroupState] = useState<{ postId: string; slideUrls: string[]; groups: number[][] } | null>(null)
@@ -97,6 +98,7 @@ export default function BenchmarkPage() {
 
   useEffect(() => {
     loadPosts()
+    loadAccountArchivedMap()
   }, [])
 
   useEffect(() => {
@@ -113,20 +115,40 @@ export default function BenchmarkPage() {
     if (d.posts) setPosts(d.posts)
   }
 
-  async function handleDeleteAccount(accountName: string) {
-    if (!confirm(`「${accountName}」の全投稿を削除しますか？\nこの操作は取り消せません。`)) return
-    setDeletingAccount(accountName)
+  async function loadAccountArchivedMap() {
+    try {
+      const r = await fetch("/api/v4/benchmark/hidden-accounts")
+      const d = await r.json() as { accountHiddenMap?: Record<string, boolean> }
+      if (d.accountHiddenMap) setAccountArchivedMap(d.accountHiddenMap)
+    } catch { /* 無視 */ }
+  }
+
+  async function handleArchiveAccount(accountName: string) {
+    setAccountArchivedMap(prev => ({ ...prev, [accountName]: true }))
+    if (selectedAccount === accountName) setSelectedAccount(null)
     try {
       const r = await fetch(`/api/benchmark/accounts?accountName=${encodeURIComponent(accountName)}`, { method: "DELETE" })
       const d = await r.json() as { ok?: boolean; error?: string }
-      if (!r.ok || d.error) throw new Error(d.error ?? "削除失敗")
-      // ローカルのpostリストから該当アカウントを除去
-      setPosts(prev => prev.filter(p => p.accountName !== accountName))
-      if (selectedAccount === accountName) setSelectedAccount(null)
+      if (!r.ok || d.error) throw new Error(d.error ?? "移動失敗")
     } catch (e) {
-      alert(e instanceof Error ? e.message : "アカウント削除に失敗しました")
-    } finally {
-      setDeletingAccount(null)
+      setAccountArchivedMap(prev => ({ ...prev, [accountName]: false }))
+      alert(e instanceof Error ? e.message : "ゴミ箱への移動に失敗しました")
+    }
+  }
+
+  async function handleRestoreAccount(accountName: string) {
+    setAccountArchivedMap(prev => ({ ...prev, [accountName]: false }))
+    try {
+      const r = await fetch("/api/benchmark/accounts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountName }),
+      })
+      const d = await r.json() as { ok?: boolean; error?: string }
+      if (!r.ok || d.error) throw new Error(d.error ?? "復元失敗")
+    } catch (e) {
+      setAccountArchivedMap(prev => ({ ...prev, [accountName]: true }))
+      alert(e instanceof Error ? e.message : "復元に失敗しました")
     }
   }
 
@@ -513,11 +535,18 @@ export default function BenchmarkPage() {
     }
   }
 
-  // group posts by accountName
+  // group posts by accountName (アーカイブ済みは除外)
   const grouped = posts.reduce<Record<string, BenchmarkPost[]>>((acc, p) => {
+    if (accountArchivedMap[p.accountName]) return acc
     ;(acc[p.accountName] ??= []).push(p)
     return acc
   }, {})
+
+  // ゴミ箱に入っているアカウント一覧
+  const archivedAccounts = Object.entries(accountArchivedMap)
+    .filter(([, v]) => v)
+    .map(([name]) => name)
+    .filter(name => posts.some(p => p.accountName === name))
 
   const bulkSummary = {
     total: bulkPosts.length,
@@ -1368,12 +1397,12 @@ export default function BenchmarkPage() {
                         background: "var(--card)",
                         border: "1px solid var(--border)",
                       }}>
-                      {/* アカウント削除ボタン（ホバー時表示） */}
+                      {/* ゴミ箱ボタン（ホバー時表示） */}
                       <button
-                        onClick={e => { e.stopPropagation(); handleDeleteAccount(account) }}
+                        onClick={e => { e.stopPropagation(); handleArchiveAccount(account) }}
                         className="absolute top-2 right-2 z-10 w-7 h-7 flex items-center justify-center rounded-lg shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
                         style={{ background: "rgba(255,255,255,0.92)", color: "#ef4444" }}
-                        title="アカウントの全投稿を削除する"
+                        title="ゴミ箱に移す"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1424,6 +1453,38 @@ export default function BenchmarkPage() {
                   )
                 })}
               </div>
+
+              {/* ゴミ箱セクション */}
+              {archivedAccounts.length > 0 && (
+                <div className="mt-6 rounded-2xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+                  <button
+                    className="w-full flex items-center gap-2 px-4 py-3 text-sm font-bold"
+                    style={{ background: "var(--card)", color: "var(--muted)" }}
+                    onClick={() => setTrashOpen(v => !v)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    ゴミ箱（{archivedAccounts.length}アカウント）
+                    {trashOpen ? <ChevronUp className="w-4 h-4 ml-auto" /> : <ChevronDown className="w-4 h-4 ml-auto" />}
+                  </button>
+                  {trashOpen && (
+                    <div className="p-4 space-y-2" style={{ background: "var(--bg)" }}>
+                      {archivedAccounts.map(name => (
+                        <div key={name} className="flex items-center justify-between px-3 py-2 rounded-xl"
+                          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                          <span className="text-sm" style={{ color: "var(--text)" }}>{name}</span>
+                          <button
+                            onClick={() => handleRestoreAccount(name)}
+                            className="px-3 py-1 rounded-lg text-xs font-bold transition-opacity hover:opacity-80"
+                            style={{ background: "#7c3aed22", color: "#7c3aed" }}
+                          >
+                            復元
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

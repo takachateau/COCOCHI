@@ -1,9 +1,12 @@
 /**
- * GET  /api/benchmark/accounts              — アカウント一覧 + bio
- * PATCH /api/benchmark/accounts             — アカウント bio を保存 { accountName, bio }
+ * GET    /api/benchmark/accounts              — アカウント一覧 + bio
+ * PATCH  /api/benchmark/accounts             — アカウント bio を保存 { accountName, bio }
+ * POST   /api/benchmark/accounts             — アカウント bio を取得 { accountName }
+ * DELETE /api/benchmark/accounts?accountName= — アカウントをゴミ箱に移す（archived）
+ * PUT    /api/benchmark/accounts             — ゴミ箱から復元 { accountName }
  */
 import { NextRequest, NextResponse } from "next/server"
-import { dbLoadBenchmarkPosts, dbLoadAccountBio, dbSaveAccountBio, dbDeleteAccountPosts } from "@/lib/supabase"
+import { dbLoadBenchmarkPosts, dbLoadAccountBio, dbSaveAccountBio, dbToggleAccountHidden } from "@/lib/supabase"
 
 export async function GET() {
   try {
@@ -49,12 +52,27 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// ゴミ箱に移す（is_hidden=true）
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const accountName = searchParams.get("accountName")
     if (!accountName?.trim()) return NextResponse.json({ error: "accountName は必須です" }, { status: 400 })
-    await dbDeleteAccountPosts(accountName.trim())
+    await dbToggleAccountHidden(accountName.trim(), true)
+    return NextResponse.json({ ok: true })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+// ゴミ箱から復元（is_hidden=false）
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json() as { accountName?: string }
+    const { accountName } = body
+    if (!accountName?.trim()) return NextResponse.json({ error: "accountName は必須です" }, { status: 400 })
+    await dbToggleAccountHidden(accountName.trim(), false)
     return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
