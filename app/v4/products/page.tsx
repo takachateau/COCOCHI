@@ -523,7 +523,6 @@ function CompetitorSection({
 // ─── メインページ ─────────────────────────────────────────────────
 
 type View = "list" | "new" | "detail"
-type DetailTab = "edit" | "competitors"
 
 export default function V3ProductsPage() {
   const { lang } = useLanguage()
@@ -533,7 +532,6 @@ export default function V3ProductsPage() {
 
   const [view, setView]                   = useState<View>("list")
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [activeTab, setActiveTab]         = useState<DetailTab>("edit")
   const [competitors, setCompetitors]     = useState<CompetitorProduct[]>([])
   const [compLoading, setCompLoading]     = useState(false)
 
@@ -553,7 +551,14 @@ export default function V3ProductsPage() {
   const [error, setError]             = useState<string | null>(null)
   const [success, setSuccess]         = useState(false)
 
-  // 競合商品を読み込む（選択商品変更時）
+  // 競合商品を一覧表示用にマウント時に読み込む
+  useEffect(() => {
+    fetch("/api/competitors")
+      .then(r => r.json() as Promise<{ products: CompetitorProduct[] }>)
+      .then(d => setCompetitors(d.products ?? []))
+  }, [])
+
+  // 商品選択時に競合商品を再読み込み（最新状態を保証）
   useEffect(() => {
     if (!selectedProduct) return
     setCompLoading(true)
@@ -615,7 +620,6 @@ export default function V3ProductsPage() {
 
   function openDetail(product: Product) {
     setSelectedProduct(product)
-    setActiveTab("edit")
     setView("detail")
   }
 
@@ -781,30 +785,15 @@ export default function V3ProductsPage() {
         </div>
       </div>
 
-      {/* タブ */}
-      <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
-        {([
-          ["edit",        <Pencil key="e" className="w-3.5 h-3.5" />,    "商品編集"],
-          ["competitors", <Package key="c" className="w-3.5 h-3.5" />,  `競合商品（${currentCompetitors.length}）`],
-        ] as [DetailTab, React.ReactNode, string][]).map(([key, icon, label]) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all"
-            style={
-              activeTab === key
-                ? { background: "var(--card)", color: "var(--accent)", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }
-                : { color: "var(--muted)" }
-            }
-          >
-            {icon}{label}
-          </button>
-        ))}
-      </div>
-
-      {/* タブコンテンツ */}
-      {activeTab === "edit" && (
-        <div className="max-w-sm">
+      {/* 2カラムレイアウト */}
+      <div className="flex flex-col lg:flex-row gap-8 lg:items-start">
+        {/* 左：商品編集 */}
+        <div className="lg:flex-shrink-0 lg:w-80 rounded-2xl p-6 space-y-1"
+          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Pencil className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />
+            <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>商品編集</h2>
+          </div>
           <ProductEditForm
             product={selectedProduct}
             onSaved={updated => {
@@ -818,23 +807,33 @@ export default function V3ProductsPage() {
             }}
           />
         </div>
-      )}
 
-      {activeTab === "competitors" && (
-        compLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-4 border-t-transparent rounded-full animate-spin"
-              style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} />
+        {/* 右：競合商品 */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-4">
+            <Package className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />
+            <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>
+              競合商品
+              <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--muted)" }}>
+                {currentCompetitors.length}件
+              </span>
+            </h2>
           </div>
-        ) : (
-          <CompetitorSection
-            product={selectedProduct}
-            competitors={currentCompetitors}
-            onAdd={cp => setCompetitors(prev => [cp, ...prev])}
-            onDelete={id => setCompetitors(prev => prev.filter(c => c.id !== id))}
-          />
-        )
-      )}
+          {compLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-6 h-6 border-4 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} />
+            </div>
+          ) : (
+            <CompetitorSection
+              product={selectedProduct}
+              competitors={currentCompetitors}
+              onAdd={cp => setCompetitors(prev => [cp, ...prev])}
+              onDelete={id => setCompetitors(prev => prev.filter(c => c.id !== id))}
+            />
+          )}
+        </div>
+      </div>
     </div>
   )
 }
