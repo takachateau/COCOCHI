@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { dbLoadPersonas, dbLoadBenchmarkPosts, dbLoadCompetitorProducts, dbUpdateBenchmarkSlideStyleDescs } from "@/lib/supabase"
 import { loadProducts } from "@/lib/products"
 import { describeV3SlideStyle } from "@/lib/referenceV2"
-import { generateV2Slide } from "@/lib/fal"
+import { generateV2Slide, generateBaseSlide } from "@/lib/fal"
 import { uploadSlideBuffers } from "@/lib/storage"
 import { calcFalCost, formatCost } from "@/lib/aiCost"
 import type {
@@ -294,37 +294,71 @@ export async function POST(req: NextRequest) {
     type SlideResult = { buffer: Buffer | null; policyFallback: boolean; falCalls: number; slideNumber: number; index: number }
 
     // ─ 背景グループ対応生成 ────────────────────────────────────────
-    // backgroundGroups があれば: グループ内全スライドが同じ参照画像を使い全スライド並列生成
-    //   → 旧来の「素背景生成→bgInherit」方式はモデルが背景を再生成してしまう問題があったため廃止
-    //   → 同じ参照画像を使うことで視覚的統一感を確保しつつシンプルかつ確実な方式に変更
-    // なければ + 競合比較投稿: 全スライドを自動で1グループ化
-    // なければ + 通常投稿: 各スライドが対応するベンチマーク画像を参照
+    // backgroundGroups があれば: bgInherit 方式を使う
+    //   1. グループごとに「素背景ベーススライド」を1枚生成（generateBaseSlide）
+    //   2. グループ内全スライドはそのベースを参照して bgInherit=true で生成
+    //      → AI はベース画像に テキストだけ を追加 → 背景・人物が全スライドで完全一致
+    //   3. ベース生成が失敗した場合は同一参照URL フォールバック（bgInherit=false）
+    // backgroundGroups なし + 競合比較投稿: 全スライドを自動で1グループ化
+    // backgroundGroups なし + 通常投稿: 各スライドが対応するベンチマーク画像を参照
     const rawBackgroundGroups = refBenchmark.backgroundGroups  // number[][] | null
     const backgroundGroups = rawBackgroundGroups ??
       (competitors.length > 0 ? [slides.map((_, i) => i)] : null)
     let usedBgGroupMode = false
 
-    // 背景グループがある場合: グループ内全スライドが同じ参照画像（グループ先頭のURL）を使う
-    const effectiveRefUrls = [...slideRefUrls]
+    // スライドごとの参照URL・bgInherit設定
+    type SlideRefConfig = { refImageUrl: string; bgInherit: boolean }
+    const slideRefMap = new Map<number, SlideRefConfig>()
+
     if (backgroundGroups && backgroundGroups.length > 0) {
       usedBgGroupMode = true
-      backgroundGroups.forEach(group => {
+
+      // グループごとにベース画像を並列生成
+      await Promise.allSettled(backgroundGroups.map(async (group) => {
         const validIndices = group.filter(bi => bi < slides.length)
         if (validIndices.length === 0) return
-        const groupRef = slideRefUrls[validIndices[0]]
-        validIndices.forEach(bi => { effectiveRefUrls[bi] = groupRef })
-      })
+
+        const groupRefUrl   = slideRefUrls[validIndices[0]]
+        const groupStyleDesc = styleDescMap.get(groupRefUrl) ?? ""
+        const finalGroupStyle = [groupStyleDesc, compositionHint].filter(Boolean).join("  ")
+
+        console.log(`[v4/generate-image] bg-group [${validIndices.join(",")}] generating base slide...`)
+        const baseResult = await generateBaseSlide({
+          refImageUrl:      groupRefUrl,
+          styleDescription: finalGroupStyle,
+          colorPalette,
+          visualProfile,
+          personaHint,
+        })
+
+        if (baseResult.buffer) {
+          const [baseUrl] = await uploadSlideBuffers([baseResult.buffer])
+          console.log(`[v4/generate-image] base ready → ${baseUrl.slice(-30)}`)
+          validIndices.forEach(bi => slideRefMap.set(bi, { refImageUrl: baseUrl, bgInherit: true }))
+        } else {
+          console.warn(`[v4/generate-image] base failed for group [${validIndices.join(",")}] — same-ref fallback`)
+          validIndices.forEach(bi => slideRefMap.set(bi, { refImageUrl: groupRefUrl, bgInherit: false }))
+        }
+      }))
     }
+
+    // 背景グループに属さないスライドは通常モード
+    slides.forEach((_, i) => {
+      if (!slideRefMap.has(i)) {
+        slideRefMap.set(i, { refImageUrl: slideRefUrls[i], bgInherit: false })
+      }
+    })
 
     async function generateOneSlide(i: number): Promise<SlideResult> {
       const slide = slides[i]
-      const refImageUrl = effectiveRefUrls[i]
+      const { refImageUrl, bgInherit } = slideRefMap.get(i)!
       const slideProduct = (postType === "product" || postType === "mixed")
         ? pickProductForSlide(slide, product, competitors, postType)
         : null
-      const slideStyleDesc = refImageUrl ? (styleDescMap.get(refImageUrl) ?? "") : ""
-      const finalStyleDesc  = [slideStyleDesc, compositionHint].filter(Boolean).join("  ")
-      console.log(`[v4/generate-image] slide ${i + 1} → FAL${usedBgGroupMode ? " (bg-group)" : ""}`)
+      // bgInherit モードでは styleDesc はベース生成済みのため不要
+      const slideStyleDesc = bgInherit ? "" : (styleDescMap.get(refImageUrl) ?? "")
+      const finalStyleDesc  = bgInherit ? "" : [slideStyleDesc, compositionHint].filter(Boolean).join("  ")
+      console.log(`[v4/generate-image] slide ${i + 1} → FAL${bgInherit ? " (bgInherit)" : usedBgGroupMode ? " (bg-group-fallback)" : ""}`)
       const result = await generateV2Slide({
         headline:         slide.headline,
         tag:              slide.tag,
@@ -337,13 +371,14 @@ export async function POST(req: NextRequest) {
         visualProfile,
         personaHint,
         productImageUrl:  slideProduct?.imageUrl,
+        bgInherit,
       })
       return { ...result, slideNumber: slide.slideNumber, index: i }
     }
 
     const slideResults: SlideResult[] = new Array(slides.length)
 
-    // 全スライド並列生成（背景グループの有無にかかわらず同じパス）
+    // ベース生成完了後、全スライド並列生成
     {
       const settled = await Promise.allSettled(slides.map((_, i) => generateOneSlide(i)))
       settled.forEach((s, i) => {

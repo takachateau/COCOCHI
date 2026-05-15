@@ -295,14 +295,30 @@ export async function generateBaseSlide(params: {
   } : undefined
 
   const prompt = [
-    `Clean lifestyle photo. ${SMARTPHONE_FEEL}.`,
-    safeStyleDesc ? `Visual style reference: ${safeStyleDesc}.` : null,
-    `Composition: copy ONLY framing, camera angle, and shot type from the reference image. Do NOT copy text or products.`,
-    `Background: match the reference image's background setting exactly — same type of location (indoor/outdoor/cafe/street etc.), same furniture or scenery elements, same lighting mood.`,
+    `Clean lifestyle photo. ${SMARTPHONE_FEEL}. Genuine Japanese woman's Lemon8 post — real, slightly imperfect, human. Never AI-looking, never studio-polished.`,
+
+    // ビジュアルの雰囲気・ライティング情報のみ借用（構図要素は除外）
+    safeStyleDesc ? `Atmosphere and lighting vibe only (do NOT copy specific composition or objects): ${safeStyleDesc}.` : null,
+
+    // 構図: ショットタイプ・カメラアングルのみ抽象的に踏襲
+    `Composition: from the reference image, copy ONLY these three abstract elements — (1) shot type (mirror selfie / portrait / waist-up / flatlay / close-up etc.), (2) camera angle (eye-level / slightly high / low), (3) overall framing (full body / waist-up / detail close-up). NOTHING ELSE from the reference composition.`,
+
+    // 背景: 同じ「場所タイプ」だが全く違う具体的な場所
+    `Background: use the SAME general setting TYPE as the reference (indoor room / outdoor street / cafe / etc.) but a COMPLETELY DIFFERENT specific place.`
+    + ` If reference = a room with white wall → generate a room with textured wall, shelves, plants, or different furniture. If reference = one cafe → a visually distinct cafe or street corner. If reference = outdoor → a different outdoor spot, different architecture.`
+    + ` Lighting QUALITY must match (bright natural daylight / warm soft glow / cool morning etc.) but the SPECIFIC location and props must be new.`
+    + ` STRICTLY FORBIDDEN: reproducing the same wall color, same furniture layout, same background objects, same floor type, same mirror as the reference.`,
+
+    // 人物: 全く異なる別人
     safeVisualProfile
-      ? `Person: Hair: ${safeVisualProfile.hair}. Fashion: ${safeVisualProfile.fashion}. Young woman (20s), East Asian aesthetic.`
+      ? `Person (FIXED PERSONA — use exact specs): Hair: ${safeVisualProfile.hair}. Fashion: ${safeVisualProfile.fashion}. Young woman (20s), East Asian aesthetic.`
         + (safeVisualProfile.photoStyle ? ` Photo style: ${safeVisualProfile.photoStyle}.` : "")
-      : `Person: young woman (20s), East Asian aesthetic, casual everyday fashion. Same shot type as reference.`,
+        + ` FORBIDDEN: copying any clothing item, accessory, hat, shoes, or pose from the reference image.`
+      : `Person: create a COMPLETELY DIFFERENT individual — never confusable with the person in the reference.`
+        + ` Different hair (different length AND different color). Different outfit (different style, different color palette). Different accessories — if the reference person wears a cap, generate someone WITHOUT a cap; if a zip jacket, choose a completely different top.`
+        + ` Different body pose and hand position.`
+        + ` Base: young woman (20s), photogenic, East Asian aesthetic. Keep the same energy level (casual / stylish / edgy) as the reference but expressed through entirely different fashion choices.`,
+
     safePersonaHint ? `Character context: ${safePersonaHint}.` : null,
     `CRITICAL RULE — NO TEXT OF ANY KIND: do not render any text, labels, headlines, bullets, numbers, or characters anywhere in the image. The photo must be 100% text-free.`,
     `NO PRODUCTS: do not show any skincare items, bottles, packaging, or cosmetics.`,
@@ -311,7 +327,10 @@ export async function generateBaseSlide(params: {
 
   console.log(`[generateBaseSlide] prompt[:200]: ${prompt.slice(0, 200)}`)
   try {
-    const buffer = await generateImage(prompt, [refImageUrl])
+    // 参照画像を渡さない → text-only 生成（gpt-image-2, ~18s）で完全オリジナルな画像を作る
+    // gpt-image-2/edit に参照画像を渡すと服装・ポーズ・背景を保守的に編集するだけで
+    // ベンチマークと似た画像にしかならないため、あえてテキスト説明だけで指示する。
+    const buffer = await generateImage(prompt, [])
     return { buffer }
   } catch (err) {
     console.error("[generateBaseSlide] 生成失敗:", err)
