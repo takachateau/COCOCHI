@@ -60,6 +60,9 @@ class Semaphore {
   }
 }
 const sem = new Semaphore(5)
+// bgInherit（テキスト追加のみ）は通常生成より軽いため別セマフォで高並列化
+// 9枚を1バッチで並列実行できるよう上限を広げる（全スライド同時 ~105s で収まる）
+const semBgInherit = new Semaphore(12)
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
   for (let i = 1; i <= retries; i++) {
@@ -236,8 +239,9 @@ async function falQueueGenerate(
  *   - 参照画像あり: nano-banana-pro/edit
  *   - 参照画像なし: nano-banana-2
  */
-async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffer> {
-  await sem.acquire()
+async function generateImage(prompt: string, imageUrls: string[], useBgInheritSem = false): Promise<Buffer> {
+  const s = useBgInheritSem ? semBgInherit : sem
+  await s.acquire()
   try {
     return await withRetry(async () => {
       let modelId: string
@@ -269,7 +273,7 @@ async function generateImage(prompt: string, imageUrls: string[]): Promise<Buffe
       return falFetch(url)
     })
   } finally {
-    sem.release()
+    s.release()
   }
 }
 
@@ -752,7 +756,8 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
 
     const imageUrls = [refImageUrl, productImageUrl].filter((u): u is string => Boolean(u))
     try {
-      const buffer = await generateImage(bgInheritPrompt, imageUrls)
+      // bgInherit は全スライド並列実行できるよう専用セマフォ（上限12）を使う
+      const buffer = await generateImage(bgInheritPrompt, imageUrls, true)
       return { buffer, policyFallback: false, falCalls: 1 }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -766,7 +771,7 @@ export async function generateV2Slide(params: V2SlideParams): Promise<V2SlideRes
         `Portrait orientation. ${noUI}`,
       ].filter(Boolean).join(" ")
       try {
-        const buffer = await generateImage(fallback, imageUrls)
+        const buffer = await generateImage(fallback, imageUrls, true)
         return { buffer, policyFallback: true, falCalls: 2 }
       } catch {
         return { buffer: null, policyFallback: true, falCalls: 2 }
