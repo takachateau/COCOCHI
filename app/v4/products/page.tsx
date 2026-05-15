@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { useProducts } from "@/context/products"
-import { Upload, Plus, Trash2, Package, Check, Pencil, X, FileText, Loader2, ChevronRight, ChevronLeft } from "lucide-react"
+import { Upload, Plus, Trash2, Package, Check, Pencil, X, FileText, Loader2, ChevronLeft } from "lucide-react"
 import type { Product } from "@/types"
 import type { CompetitorProduct } from "@/types/v2"
 import { useLanguage } from "@/context/language"
@@ -115,9 +115,9 @@ function PdfUploader({ pdfText, onExtracted }: { pdfText: string; onExtracted: (
   )
 }
 
-// ─── 商品カード（一覧用） ─────────────────────────────────────────
+// ─── 一覧用：縦型商品カード ───────────────────────────────────────
 
-function ProductListCard({
+function ProductGridCard({
   product, competitorCount, onClick,
 }: {
   product: Product; competitorCount: number; onClick: () => void
@@ -125,26 +125,37 @@ function ProductListCard({
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-4 p-4 rounded-2xl text-left transition-opacity hover:opacity-80 w-full"
+      className="rounded-2xl overflow-hidden text-left transition-all hover:shadow-lg group w-full"
       style={{ background: "var(--card)", border: "1px solid var(--border)" }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={product.imageUrl} alt={product.name}
-        className="w-16 h-16 object-cover rounded-xl flex-shrink-0"
-        style={{ border: "1px solid var(--border)" }}
-      />
-      <div className="flex-1 min-w-0">
-        <p className="font-bold text-sm" style={{ color: "var(--text)" }}>{product.name}</p>
-        {product.price && <p className="text-xs mt-0.5" style={{ color: "var(--accent)" }}>{product.price}</p>}
-        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>競合商品 {competitorCount}件登録済み</p>
+      {/* 商品画像 */}
+      <div className="relative" style={{ aspectRatio: "1/1", background: "var(--accent-light)" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={product.imageUrl} alt={product.name} className="w-full h-full object-contain p-3" />
+        {product.pdfText && (
+          <div className="absolute bottom-2 left-2">
+            <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full"
+              style={{ background: "rgba(0,0,0,0.5)", color: "white" }}>
+              <FileText className="w-2.5 h-2.5" />PDF
+            </span>
+          </div>
+        )}
       </div>
-      <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--muted)" }} />
+      {/* 商品情報 */}
+      <div className="p-3 space-y-1">
+        <p className="text-sm font-bold leading-snug" style={{ color: "var(--text)" }}>{product.name}</p>
+        {product.price && (
+          <p className="text-xs font-bold" style={{ color: "var(--accent)" }}>{product.price}</p>
+        )}
+        <p className="text-xs" style={{ color: "var(--muted)" }}>
+          競合商品 {competitorCount}件
+        </p>
+      </div>
     </button>
   )
 }
 
-// ─── 商品編集フォーム（詳細ビュー内） ────────────────────────────
+// ─── 商品編集フォーム（全幅・2カラム） ───────────────────────────
 
 function ProductEditForm({
   product, onSaved, onDeleted,
@@ -167,6 +178,7 @@ function ProductEditForm({
   const [mime, setMime]                   = useState(product.imageMime)
   const [saving, setSaving]               = useState(false)
   const [error, setError]                 = useState<string | null>(null)
+  const [saved, setSaved]                 = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -200,6 +212,8 @@ function ProductEditForm({
       const data = await res.json()
       if (!res.ok || data.error) throw new Error(data.error ?? p.updateFailed)
       onSaved(data as Product)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
     } catch (err) {
       setError(err instanceof Error ? err.message : p.updateFailed)
     } finally {
@@ -217,41 +231,61 @@ function ProductEditForm({
   }
 
   return (
-    <div className="space-y-4">
-      {/* 商品画像 */}
-      <div>
-        <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
-          {p.imageLabel}
-        </label>
-        <div
-          onClick={() => fileRef.current?.click()}
-          className="relative border-2 border-dashed rounded-xl cursor-pointer flex items-center justify-center overflow-hidden"
-          style={{ height: 140, borderColor: base64 ? "var(--accent)" : "var(--border)", background: "var(--accent-light)" }}
-        >
-          {preview ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="" className="h-full w-full object-contain p-2" />
-          ) : (
-            <Upload className="w-5 h-5" style={{ color: "var(--accent)" }} />
-          )}
+    <div className="space-y-6">
+      {/* 上段：画像 + 基本情報 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* 画像アップロード */}
+        <div>
+          <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
+            {p.imageLabel}
+          </label>
+          <div
+            onClick={() => fileRef.current?.click()}
+            className="relative border-2 border-dashed rounded-xl cursor-pointer flex items-center justify-center overflow-hidden"
+            style={{ height: 200, borderColor: base64 ? "var(--accent)" : "var(--border)", background: "var(--accent-light)" }}
+          >
+            {preview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={preview} alt="" className="h-full w-full object-contain p-2" />
+            ) : (
+              <div className="text-center">
+                <Upload className="w-6 h-6 mx-auto mb-1" style={{ color: "var(--accent)" }} />
+                <p className="text-xs" style={{ color: "var(--accent)" }}>クリックして変更</p>
+              </div>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
         </div>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
+
+        {/* 基本情報（名前・価格・アピール・禁止） */}
+        <div className="lg:col-span-2 space-y-4">
+          <Field label={p.nameLabel} value={name} onChange={setName} placeholder="例: 22:00 アネトス クレンジングウォーター" required />
+          <Field label={p.priceLabel} value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
+          <Field label={p.appealLabel} value={appealPoints} onChange={setAppealPoints} placeholder="例: 敏感肌処方・無香料・皮膚科医監修" rows={3} hint={p.appealHint} />
+          <Field label={p.forbiddenLabel} value={forbiddenWords} onChange={setForbiddenWords} placeholder="例: 治る, 治療する, メラニン分解" rows={2} hint={p.forbiddenHint} />
+        </div>
       </div>
 
-      <Field label={p.nameLabel} value={name} onChange={setName} placeholder="" required />
-      <Field label={p.ingredientsLabel} value={ingredients} onChange={setIngredients} placeholder="" rows={4} required hint={p.ingredientsHint} />
-      <Field label={p.howToUseLabel} value={howToUse} onChange={setHowToUse} placeholder="" rows={2} required />
-      <Field label={p.priceLabel} value={price} onChange={setPrice} placeholder="例: ¥2,200（税込）" />
-      <Field label={p.appealLabel} value={appealPoints} onChange={setAppealPoints} placeholder="" rows={2} hint={p.appealHint} />
-      <Field label={p.forbiddenLabel} value={forbiddenWords} onChange={setForbiddenWords} placeholder="" rows={2} hint={p.forbiddenHint} />
-      <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
+      {/* 下段：詳細情報 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Field label={p.ingredientsLabel} value={ingredients} onChange={setIngredients} placeholder="例: セラミド配合で肌バリアを補強..." rows={6} required hint={p.ingredientsHint} />
+        <div className="space-y-4">
+          <Field label={p.howToUseLabel} value={howToUse} onChange={setHowToUse} placeholder="例: コットンに染み込ませて優しく拭き取る" rows={4} required />
+          <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
+        </div>
+      </div>
 
+      {/* エラー・成功 */}
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {saved && (
+        <p className="text-xs font-bold" style={{ color: "var(--accent)" }}>保存しました</p>
+      )}
 
-      <div className="flex gap-3">
+      {/* ボタン行 */}
+      <div className="flex items-center gap-3">
         <button
           onClick={handleSave} disabled={saving}
-          className="flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white disabled:opacity-60"
+          className="px-6 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white disabled:opacity-60 transition-opacity hover:opacity-85"
           style={{ background: "var(--accent)" }}
         >
           {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : t.common.save}
@@ -259,7 +293,7 @@ function ProductEditForm({
         <button
           onClick={() => confirmDelete ? handleDelete() : setConfirmDelete(true)}
           onBlur={() => setConfirmDelete(false)}
-          className="px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-1.5 transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors"
           style={{
             background: confirmDelete ? "#ef4444" : "var(--bg)",
             color: confirmDelete ? "white" : "var(--muted)",
@@ -267,6 +301,7 @@ function ProductEditForm({
           }}
         >
           {confirmDelete ? <Check className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+          {confirmDelete ? "本当に削除" : "削除"}
         </button>
       </div>
     </div>
@@ -291,13 +326,13 @@ function CompetitorSection({
   const { lang } = useLanguage()
   const t = useT(lang)
   const c = t.competitors
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm]         = useState(EMPTY_COMP_FORM)
-  const [imageFile, setImageFile]   = useState<File | null>(null)
+  const [showForm, setShowForm]         = useState(false)
+  const [form, setForm]                 = useState(EMPTY_COMP_FORM)
+  const [imageFile, setImageFile]       = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState("")
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState("")
-  const [dragging, setDragging] = useState(false)
+  const [saving, setSaving]             = useState(false)
+  const [error, setError]               = useState("")
+  const [dragging, setDragging]         = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   function setImage(f: File) {
@@ -352,7 +387,6 @@ function CompetitorSection({
 
   return (
     <div className="space-y-4">
-      {/* 追加ボタン */}
       <div className="flex justify-end">
         <button
           onClick={() => setShowForm(v => !v)}
@@ -364,17 +398,12 @@ function CompetitorSection({
         </button>
       </div>
 
-      {/* 登録フォーム */}
       {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-2xl p-6 space-y-4"
-          style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-        >
+        <form onSubmit={handleSubmit} className="rounded-2xl p-6 space-y-4"
+          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <h3 className="text-sm font-bold" style={{ color: "var(--text)" }}>
             「{product.name}」{c.formTitle}
           </h3>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {([
               ["brandName",   c.brandName,   "例: COSRX",             true],
@@ -386,8 +415,7 @@ function CompetitorSection({
                 <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--muted)" }}>
                   {label} {req && <span style={{ color: "var(--accent)" }}>*</span>}
                 </label>
-                <input
-                  type="text" value={form[key]}
+                <input type="text" value={form[key]}
                   onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
                   placeholder={ph}
                   className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
@@ -396,7 +424,6 @@ function CompetitorSection({
               </div>
             ))}
           </div>
-
           {([
             ["features", c.features, "例: ヒアルロン酸・セラミド配合",  true],
             ["pros",     c.pros,     "例: 保湿力が高くべたつかない",     true],
@@ -407,8 +434,7 @@ function CompetitorSection({
               <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--muted)" }}>
                 {label} {req && <span style={{ color: "var(--accent)" }}>*</span>}
               </label>
-              <textarea
-                value={form[key]}
+              <textarea value={form[key]}
                 onChange={e => setForm(prev => ({ ...prev, [key]: e.target.value }))}
                 placeholder={ph} rows={2}
                 className="w-full px-3 py-2 rounded-lg border text-sm outline-none resize-none"
@@ -416,8 +442,6 @@ function CompetitorSection({
               />
             </div>
           ))}
-
-          {/* 画像アップロード */}
           <div>
             <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--muted)" }}>
               {c.imageLabel} <span style={{ color: "var(--accent)" }}>*</span>
@@ -427,20 +451,15 @@ function CompetitorSection({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={imagePreview} alt="preview" className="w-32 h-32 object-cover rounded-xl"
                   style={{ border: "1px solid var(--border)" }} />
-                <button
-                  type="button"
+                <button type="button"
                   onClick={() => { setImageFile(null); setImagePreview("") }}
                   className="absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs"
-                  style={{ background: "var(--accent)" }}
-                >×</button>
+                  style={{ background: "var(--accent)" }}>×</button>
               </div>
             ) : (
               <div
                 className="rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors"
-                style={{
-                  borderColor: dragging ? "var(--accent)" : "var(--border)",
-                  background:  dragging ? "var(--accent-light)" : "var(--bg)",
-                }}
+                style={{ borderColor: dragging ? "var(--accent)" : "var(--border)", background: dragging ? "var(--accent-light)" : "var(--bg)" }}
                 onDragOver={e => { e.preventDefault(); setDragging(true) }}
                 onDragLeave={() => setDragging(false)}
                 onDrop={onImageDrop}
@@ -453,14 +472,10 @@ function CompetitorSection({
               </div>
             )}
           </div>
-
           {error && <p className="text-sm" style={{ color: "#e53e3e" }}>{error}</p>}
-
-          <button
-            type="submit" disabled={saving}
+          <button type="submit" disabled={saving}
             className="px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-85 disabled:opacity-50 flex items-center gap-2"
-            style={{ background: "var(--accent)" }}
-          >
+            style={{ background: "var(--accent)" }}>
             {saving
               ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />{t.common.registering}</>
               : t.common.register}
@@ -468,7 +483,6 @@ function CompetitorSection({
         </form>
       )}
 
-      {/* 競合商品一覧 */}
       {competitors.length === 0 && !showForm ? (
         <div className="rounded-2xl p-10 text-center"
           style={{ background: "var(--card)", border: "1px dashed var(--border)" }}>
@@ -504,11 +518,9 @@ function CompetitorSection({
                 <p style={{ color: "var(--text)" }}><span style={{ color: "var(--muted)" }}>{c.consLabel}</span>{cp.cons}</p>
               </div>
               <div className="px-4 pb-4">
-                <button
-                  onClick={() => handleDelete(cp.id)}
+                <button onClick={() => handleDelete(cp.id)}
                   className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70"
-                  style={{ color: "var(--muted)" }}
-                >
+                  style={{ color: "var(--muted)" }}>
                   <Trash2 className="w-3 h-3" /> {t.common.delete}
                 </button>
               </div>
@@ -523,6 +535,7 @@ function CompetitorSection({
 // ─── メインページ ─────────────────────────────────────────────────
 
 type View = "list" | "new" | "detail"
+type DetailTab = "edit" | "competitors"
 
 export default function V3ProductsPage() {
   const { lang } = useLanguage()
@@ -532,6 +545,7 @@ export default function V3ProductsPage() {
 
   const [view, setView]                   = useState<View>("list")
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [activeTab, setActiveTab]         = useState<DetailTab>("edit")
   const [competitors, setCompetitors]     = useState<CompetitorProduct[]>([])
   const [compLoading, setCompLoading]     = useState(false)
 
@@ -551,14 +565,14 @@ export default function V3ProductsPage() {
   const [error, setError]             = useState<string | null>(null)
   const [success, setSuccess]         = useState(false)
 
-  // 競合商品を一覧表示用にマウント時に読み込む
+  // 競合商品をマウント時に全件読み込み（一覧の件数表示用）
   useEffect(() => {
     fetch("/api/competitors")
       .then(r => r.json() as Promise<{ products: CompetitorProduct[] }>)
       .then(d => setCompetitors(d.products ?? []))
   }, [])
 
-  // 商品選択時に競合商品を再読み込み（最新状態を保証）
+  // 商品選択時に競合商品を再読み込み
   useEffect(() => {
     if (!selectedProduct) return
     setCompLoading(true)
@@ -618,11 +632,6 @@ export default function V3ProductsPage() {
     }
   }
 
-  function openDetail(product: Product) {
-    setSelectedProduct(product)
-    setView("detail")
-  }
-
   const currentCompetitors = selectedProduct
     ? competitors.filter(c => c.productId === selectedProduct.id)
     : []
@@ -631,7 +640,6 @@ export default function V3ProductsPage() {
   if (view === "list") {
     return (
       <div className="space-y-6">
-        {/* ヘッダー */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>{p.pageTitle}</h1>
@@ -645,12 +653,10 @@ export default function V3ProductsPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-85"
             style={{ background: "var(--accent)" }}
           >
-            <Plus className="w-4 h-4" />
-            {p.newProduct}
+            <Plus className="w-4 h-4" />{p.newProduct}
           </button>
         </div>
 
-        {/* 商品カードグリッド */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-7 h-7 border-4 border-t-transparent rounded-full animate-spin"
@@ -669,13 +675,13 @@ export default function V3ProductsPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {products.map(prod => (
-              <ProductListCard
+              <ProductGridCard
                 key={prod.id}
                 product={prod}
                 competitorCount={competitors.filter(c => c.productId === prod.id).length}
-                onClick={() => openDetail(prod)}
+                onClick={() => { setSelectedProduct(prod); setActiveTab("edit"); setView("detail") }}
               />
             ))}
           </div>
@@ -688,7 +694,6 @@ export default function V3ProductsPage() {
   if (view === "new") {
     return (
       <div className="space-y-6">
-        {/* ヘッダー */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => setView("list")}
@@ -702,7 +707,6 @@ export default function V3ProductsPage() {
 
         <div className="max-w-sm rounded-2xl p-6 space-y-4"
           style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          {/* 画像アップロード */}
           <div>
             <label className="block text-xs font-bold mb-1" style={{ color: "var(--text)" }}>
               {p.imageLabel} <span style={{ color: "var(--accent)" }}>*</span>
@@ -725,7 +729,6 @@ export default function V3ProductsPage() {
             </div>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
           </div>
-
           <Field label={p.nameLabel} value={name} onChange={setName} placeholder="例: 22:00 アネトス クレンジングウォーター" required />
           <Field label={p.ingredientsLabel} value={ingredients} onChange={setIngredients} placeholder="例: セラミド配合で肌バリアを補強..." rows={4} required hint={p.ingredientsHint} />
           <Field label={p.howToUseLabel} value={howToUse} onChange={setHowToUse} placeholder="例: コットンに染み込ませて優しく拭き取る" rows={2} required />
@@ -733,18 +736,8 @@ export default function V3ProductsPage() {
           <Field label={p.appealLabel} value={appealPoints} onChange={setAppealPoints} placeholder="例: 敏感肌処方・無香料・皮膚科医監修" rows={2} hint={p.appealHint} />
           <Field label={p.forbiddenLabel} value={forbiddenWords} onChange={setForbiddenWords} placeholder="例: 治る, 治療する, メラニン分解" rows={2} hint={p.forbiddenHint} />
           <PdfUploader pdfText={pdfText} onExtracted={setPdfText} />
-
-          {error && (
-            <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200">
-              <p className="text-xs text-red-700">{error}</p>
-            </div>
-          )}
-          {success && (
-            <div className="px-3 py-2 rounded-lg" style={{ background: "var(--accent-light)", border: "1px solid var(--accent)" }}>
-              <p className="text-xs font-bold" style={{ color: "var(--accent)" }}>{p.successMsg}</p>
-            </div>
-          )}
-
+          {error && <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200"><p className="text-xs text-red-700">{error}</p></div>}
+          {success && <div className="px-3 py-2 rounded-lg" style={{ background: "var(--accent-light)", border: "1px solid var(--accent)" }}><p className="text-xs font-bold" style={{ color: "var(--accent)" }}>{p.successMsg}</p></div>}
           <button
             onClick={handleSave} disabled={saving}
             className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white transition-opacity disabled:opacity-60"
@@ -774,66 +767,56 @@ export default function V3ProductsPage() {
           <ChevronLeft className="w-4 h-4" />{t.common.back}
         </button>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={selectedProduct.imageUrl} alt={selectedProduct.name}
+        <img src={selectedProduct.imageUrl} alt={selectedProduct.name}
           className="w-10 h-10 object-cover rounded-lg flex-shrink-0"
-          style={{ border: "1px solid var(--border)" }}
-        />
+          style={{ border: "1px solid var(--border)" }} />
         <div className="min-w-0">
           <h1 className="text-lg font-bold truncate" style={{ color: "var(--text)" }}>{selectedProduct.name}</h1>
           <p className="text-xs" style={{ color: "var(--muted)" }}>競合商品 {currentCompetitors.length}件</p>
         </div>
       </div>
 
-      {/* 2カラムレイアウト */}
-      <div className="flex flex-col lg:flex-row gap-8 lg:items-start">
-        {/* 左：商品編集 */}
-        <div className="lg:flex-shrink-0 lg:w-80 rounded-2xl p-6 space-y-1"
-          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center gap-2 mb-4">
-            <Pencil className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />
-            <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>商品編集</h2>
-          </div>
-          <ProductEditForm
-            product={selectedProduct}
-            onSaved={updated => {
-              updateProduct(updated)
-              setSelectedProduct(updated)
-            }}
-            onDeleted={id => {
-              removeProduct(id)
-              setView("list")
-              setSelectedProduct(null)
-            }}
-          />
-        </div>
-
-        {/* 右：競合商品 */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-4">
-            <Package className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />
-            <h2 className="text-sm font-bold" style={{ color: "var(--text)" }}>
-              競合商品
-              <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--muted)" }}>
-                {currentCompetitors.length}件
-              </span>
-            </h2>
-          </div>
-          {compLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="w-6 h-6 border-4 border-t-transparent rounded-full animate-spin"
-                style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} />
-            </div>
-          ) : (
-            <CompetitorSection
-              product={selectedProduct}
-              competitors={currentCompetitors}
-              onAdd={cp => setCompetitors(prev => [cp, ...prev])}
-              onDelete={id => setCompetitors(prev => prev.filter(c => c.id !== id))}
-            />
-          )}
-        </div>
+      {/* タブ */}
+      <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
+        {([
+          ["edit",        <Pencil key="e" className="w-3.5 h-3.5" />,   "商品編集"],
+          ["competitors", <Package key="c" className="w-3.5 h-3.5" />, `競合商品（${currentCompetitors.length}）`],
+        ] as [DetailTab, React.ReactNode, string][]).map(([key, icon, label]) => (
+          <button key={key} onClick={() => setActiveTab(key)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all"
+            style={activeTab === key
+              ? { background: "var(--card)", color: "var(--accent)", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }
+              : { color: "var(--muted)" }}
+          >
+            {icon}{label}
+          </button>
+        ))}
       </div>
+
+      {/* タブコンテンツ */}
+      {activeTab === "edit" && (
+        <ProductEditForm
+          product={selectedProduct}
+          onSaved={updated => { updateProduct(updated); setSelectedProduct(updated) }}
+          onDeleted={id => { removeProduct(id); setView("list"); setSelectedProduct(null) }}
+        />
+      )}
+
+      {activeTab === "competitors" && (
+        compLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-6 h-6 border-4 border-t-transparent rounded-full animate-spin"
+              style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} />
+          </div>
+        ) : (
+          <CompetitorSection
+            product={selectedProduct}
+            competitors={currentCompetitors}
+            onAdd={cp => setCompetitors(prev => [cp, ...prev])}
+            onDelete={id => setCompetitors(prev => prev.filter(c => c.id !== id))}
+          />
+        )
+      )}
     </div>
   )
 }
