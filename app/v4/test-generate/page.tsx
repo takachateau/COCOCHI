@@ -92,17 +92,16 @@ export default function TestGeneratePage() {
     fetch("/api/products").then(r => r.json()).then((d: Product[]) => setProducts(Array.isArray(d) ? d : []))
   }, [])
 
-  // ペルソナ選択時: 全件取得してクライアント側でアカウント名フィルタ
-  // ※ API の ?accountName= クエリは日本語文字コードの不一致で機能しないため全件取得して絞る
+  // ペルソナ選択時: accountName をクエリパラメータで渡してサーバー側でフィルタ
+  // encodeURIComponent で日本語を正しくエンコードすることで全件取得を回避
   useEffect(() => {
     const account = selectedPersona?.benchmarkAccount
     if (!account) { setBenchmarkPosts([]); setSelectedBenchmarkPath(null); return }
-    fetch("/api/benchmark/posts")
+    fetch(`/api/benchmark/posts?accountName=${encodeURIComponent(account)}`)
       .then(r => r.json())
       .then((d: { posts?: BenchmarkPost[] }) => {
-        // アカウントで絞り込み + 非表示を除外
-        const filtered = (d.posts ?? []).filter(p => p.accountName === account && !p.isHidden)
-        setBenchmarkPosts(filtered)
+        // 非表示のみクライアント側で除外（アカウントフィルタはサーバー側で完了）
+        setBenchmarkPosts((d.posts ?? []).filter(p => !p.isHidden))
       })
       .catch(() => setBenchmarkPosts([]))
     setSelectedBenchmarkPath(null)

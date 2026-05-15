@@ -6,9 +6,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { dbLoadBenchmarkPosts, dbDeleteBenchmarkPost, dbRenameAccount } from "@/lib/supabase"
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const posts = await dbLoadBenchmarkPosts()
+    const { searchParams } = new URL(req.url)
+    // accountName が指定された場合は DB クエリレベルでフィルタ（全件取得を避ける）
+    const accountName = searchParams.get("accountName") ?? undefined
+    const posts = await dbLoadBenchmarkPosts(accountName)
     return NextResponse.json({ posts })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
