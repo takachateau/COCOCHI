@@ -11,7 +11,6 @@ import { useT } from "@/lib/i18n"
 
 const NAV_HREFS = [
   { href: "/v4/benchmark",     key: "benchmark"    },
-  { href: "/v4/competitors",   key: "competitors"  },
   { href: "/v4/products",      key: "products"     },
   { href: "/v4/personas",      key: "personas"     },
   { href: "/v4/test-generate", key: "testGenerate" },
