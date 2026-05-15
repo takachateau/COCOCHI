@@ -82,7 +82,7 @@ export default function BenchmarkPage() {
   const [loadingBio, setLoadingBio]         = useState(false)
 
   // ─── アカウントレベル非表示 ───
-  const [accountHiddenMap, setAccountHiddenMap] = useState<Record<string, boolean>>({})
+  const [deletingAccount, setDeletingAccount] = useState<string | null>(null)
 
   // ─── 背景グループ設定 ───
   const [bgGroupState, setBgGroupState] = useState<{ postId: string; slideUrls: string[]; groups: number[][] } | null>(null)
@@ -97,7 +97,6 @@ export default function BenchmarkPage() {
 
   useEffect(() => {
     loadPosts()
-    loadAccountHiddenMap()
   }, [])
 
   useEffect(() => {
@@ -114,31 +113,20 @@ export default function BenchmarkPage() {
     if (d.posts) setPosts(d.posts)
   }
 
-  async function loadAccountHiddenMap() {
+  async function handleDeleteAccount(accountName: string) {
+    if (!confirm(`「${accountName}」の全投稿を削除しますか？\nこの操作は取り消せません。`)) return
+    setDeletingAccount(accountName)
     try {
-      const r = await fetch("/api/v4/benchmark/hidden-accounts")
-      const d = await r.json() as { accountHiddenMap?: Record<string, boolean> }
-      if (d.accountHiddenMap) setAccountHiddenMap(d.accountHiddenMap)
-    } catch { /* 無視 */ }
-  }
-
-  async function handleToggleAccountHidden(accountName: string) {
-    const currentHidden = accountHiddenMap[accountName] ?? false
-    const newHidden = !currentHidden
-    // 即時反映
-    setAccountHiddenMap(prev => ({ ...prev, [accountName]: newHidden }))
-    try {
-      const r = await fetch("/api/v4/benchmark/toggle-account-hidden", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountName, isHidden: newHidden }),
-      })
+      const r = await fetch(`/api/benchmark/accounts?accountName=${encodeURIComponent(accountName)}`, { method: "DELETE" })
       const d = await r.json() as { ok?: boolean; error?: string }
-      if (!r.ok || d.error) throw new Error(d.error ?? "更新失敗")
+      if (!r.ok || d.error) throw new Error(d.error ?? "削除失敗")
+      // ローカルのpostリストから該当アカウントを除去
+      setPosts(prev => prev.filter(p => p.accountName !== accountName))
+      if (selectedAccount === accountName) setSelectedAccount(null)
     } catch (e) {
-      // 失敗したら元に戻す
-      setAccountHiddenMap(prev => ({ ...prev, [accountName]: currentHidden }))
-      alert(e instanceof Error ? e.message : "アカウント非表示設定に失敗しました")
+      alert(e instanceof Error ? e.message : "アカウント削除に失敗しました")
+    } finally {
+      setDeletingAccount(null)
     }
   }
 
@@ -1374,33 +1362,21 @@ export default function BenchmarkPage() {
                   const topComp   = Object.entries(st.compCounts).sort((a, b) => b[1] - a[1])[0]?.[0]
                   // サムネイル: 各投稿の1枚目を最大4枚
                   const thumbs = accountPosts.slice(0, 4).map(p => p.slideUrls[0]).filter(Boolean)
-                  const isAccountHidden = accountHiddenMap[account] ?? false
-
                   return (
                     <div key={account} className="relative group rounded-2xl overflow-hidden transition-all hover:shadow-lg"
                       style={{
                         background: "var(--card)",
-                        border: isAccountHidden ? "1px solid #ef444466" : "1px solid var(--border)",
-                        opacity: isAccountHidden ? 0.65 : 1,
+                        border: "1px solid var(--border)",
                       }}>
-                      {/* アカウント非表示トグル（ホバー時表示） */}
+                      {/* アカウント削除ボタン（ホバー時表示） */}
                       <button
-                        onClick={e => { e.stopPropagation(); handleToggleAccountHidden(account) }}
+                        onClick={e => { e.stopPropagation(); handleDeleteAccount(account) }}
                         className="absolute top-2 right-2 z-10 w-7 h-7 flex items-center justify-center rounded-lg shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ background: "rgba(255,255,255,0.92)", color: isAccountHidden ? "#16a34a" : "#6b7280" }}
-                        title={isAccountHidden ? "アカウントを表示に戻す" : "アカウントを非表示にする（生成から除外）"}
+                        style={{ background: "rgba(255,255,255,0.92)", color: "#ef4444" }}
+                        title="アカウントの全投稿を削除する"
                       >
-                        {isAccountHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
-
-                      {/* 非表示バッジ */}
-                      {isAccountHidden && (
-                        <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md"
-                          style={{ background: "rgba(239,68,68,0.85)", fontSize: 9, color: "#fff", lineHeight: 1.4 }}>
-                          <EyeOff className="w-2.5 h-2.5" />
-                          非表示
-                        </div>
-                      )}
 
                       {/* クリックでアカウント詳細へ */}
                       <button className="w-full text-left" onClick={() => setSelectedAccount(account)}>

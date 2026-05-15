@@ -285,6 +285,11 @@ export async function dbDeleteBenchmarkPost(id: string): Promise<void> {
   if (error) throw new Error(`BenchmarkPost delete error: ${error.message}`)
 }
 
+export async function dbDeleteAccountPosts(accountName: string): Promise<void> {
+  const { error } = await supabase.from("benchmark_posts").delete().eq("account_name", accountName)
+  if (error) throw new Error(`Account posts delete error: ${error.message}`)
+}
+
 // スライドスタイル説明をマージ保存（既存キャッシュを上書きせず追記）
 export async function dbUpdateBenchmarkSlideStyleDescs(
   id: string,

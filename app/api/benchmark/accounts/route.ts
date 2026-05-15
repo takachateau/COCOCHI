@@ -3,7 +3,7 @@
  * PATCH /api/benchmark/accounts             — アカウント bio を保存 { accountName, bio }
  */
 import { NextRequest, NextResponse } from "next/server"
-import { dbLoadBenchmarkPosts, dbLoadAccountBio, dbSaveAccountBio } from "@/lib/supabase"
+import { dbLoadBenchmarkPosts, dbLoadAccountBio, dbSaveAccountBio, dbDeleteAccountPosts } from "@/lib/supabase"
 
 export async function GET() {
   try {
@@ -43,6 +43,19 @@ export async function POST(req: NextRequest) {
     if (!accountName?.trim()) return NextResponse.json({ error: "accountName は必須です" }, { status: 400 })
     const bio = await dbLoadAccountBio(accountName.trim())
     return NextResponse.json({ bio })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const accountName = searchParams.get("accountName")
+    if (!accountName?.trim()) return NextResponse.json({ error: "accountName は必須です" }, { status: 400 })
+    await dbDeleteAccountPosts(accountName.trim())
+    return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })
